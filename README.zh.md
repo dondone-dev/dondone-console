@@ -1,23 +1,23 @@
 # Dondone Console
 
-[中文文档](./README.zh.md)
+[English](./README.md)
 
-Cloudflare Pages admin console for managing Dondone users, services, permission groups, and grants.
+部署在 Cloudflare Pages 的 Dondone 管理后台，用于管理用户、服务、权限组和授权。
 
-## Stack
+## 技术栈
 
-React 19 + TypeScript · Vite · Tailwind CSS v4 · shadcn/ui-style components · Cloudflare Pages Functions · Supabase service role
+React 19 + TypeScript · Vite · Tailwind CSS v4 · shadcn/ui 风格组件 · Cloudflare Pages Functions · Supabase service role
 
-## Authentication
+## 登录
 
-Console uses Dondone Auth with the same PKCE flow as other apps:
+Console 通过 Dondone Auth 登录，使用和其他应用一致的 PKCE 流程：
 
 ```sh
 VITE_AUTH_BASE=https://auth.dondone.dev
 VITE_AUTH_CLIENT_ID=console
 ```
 
-Register the client in `dondone-auth`:
+需要在 `dondone-auth` 注册 client：
 
 ```json
 {
@@ -28,9 +28,9 @@ Register the client in `dondone-auth`:
 }
 ```
 
-## Functions Environment
+## Functions 环境变量
 
-Configure these in Cloudflare Pages:
+在 Cloudflare Pages 中配置：
 
 ```sh
 SUPABASE_URL=https://ttmrvhkmqljulrptviow.supabase.co
@@ -39,21 +39,21 @@ SUPABASE_SERVICE_ROLE_KEY=<supabase-service-role-secret>
 CONSOLE_BOOTSTRAP_EMAILS=you@example.com
 ```
 
-Set the service role key as a Pages secret:
+使用 Pages secret 设置 service role key：
 
 ```sh
 echo "sb_secret_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" | pnpm wrangler pages secret put SUPABASE_SERVICE_ROLE_KEY --project-name dondone-console
 ```
 
-## Bootstrap
+## 初始化管理员
 
-After SQL migration is executed, sign in with an email listed in `CONSOLE_BOOTSTRAP_EMAILS`. The Console will show an initialization action that grants the built-in `console/admin` group to that user.
+执行 SQL migration 后，用 `CONSOLE_BOOTSTRAP_EMAILS` 中的邮箱登录。Console 会显示初始化操作，为当前用户授予内置 `console/admin` 权限组。
 
-## Deployment
+## 部署
 
-Create or connect a Cloudflare Pages project named `dondone-console`.
+创建或连接名为 `dondone-console` 的 Cloudflare Pages 项目。
 
-Recommended Pages settings:
+推荐 Pages 配置：
 
 ```sh
 Build command: pnpm build
@@ -62,13 +62,13 @@ Production branch: main
 Custom domain: console.dondone.dev
 ```
 
-Set the service role key before deploying:
+部署前先设置 service role key：
 
 ```sh
 echo "sb_secret_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" | pnpm wrangler pages secret put SUPABASE_SERVICE_ROLE_KEY --project-name dondone-console
 ```
 
-Build and deploy manually with Wrangler:
+使用 Wrangler 手动构建并部署：
 
 ```sh
 pnpm install
@@ -77,7 +77,7 @@ pnpm build
 pnpm wrangler pages deploy dist --project-name dondone-console
 ```
 
-## Development
+## 开发
 
 ```sh
 pnpm install
@@ -87,7 +87,7 @@ pnpm build
 pnpm dev
 ```
 
-For local Pages Functions:
+本地运行 Pages Functions：
 
 ```sh
 pnpm pages:dev

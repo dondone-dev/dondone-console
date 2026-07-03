@@ -1,0 +1,9 @@
+name = "dondone-console"
+compatibility_date = "2026-07-03"
+pages_build_output_dir = "dist"
+
+[vars]
+SUPABASE_URL = "https://ttmrvhkmqljulrptviow.supabase.co"
+SUPABASE_PUBLISHABLE_KEY = "sb_publishable_5jnBwB84hcwhi2uwqPJQpQ_VBP161NF"
+AUTH_BASE = "https://auth.dondone.dev"
+CONSOLE_BOOTSTRAP_EMAILS = ""
