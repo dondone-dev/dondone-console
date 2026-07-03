@@ -39,10 +39,10 @@ VITE_AUTH_BASE=https://auth.dondone.dev
 VITE_AUTH_CLIENT_ID=console
 ```
 
-Set this environment variable manually in Cloudflare Pages because the repository default is intentionally empty:
+Set this bootstrap allowlist as a Pages secret because `wrangler.toml` is the source of truth for Pages configuration:
 
 ```sh
-CONSOLE_BOOTSTRAP_EMAILS=you@example.com
+echo "you@example.com" | pnpm wrangler pages secret put CONSOLE_BOOTSTRAP_EMAILS --project-name dondone-console
 ```
 
 Set this secret manually. Do not commit it:
@@ -89,7 +89,13 @@ After the Pages project exists, set the service role key:
 echo "sb_secret_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" | pnpm wrangler pages secret put SUPABASE_SERVICE_ROLE_KEY --project-name dondone-console
 ```
 
-Set `CONSOLE_BOOTSTRAP_EMAILS` in the Cloudflare Pages dashboard under project environment variables.
+Set the bootstrap email allowlist after the Pages project exists:
+
+```sh
+echo "you@example.com" | pnpm wrangler pages secret put CONSOLE_BOOTSTRAP_EMAILS --project-name dondone-console
+```
+
+After the first admin is initialized, you can rotate this value to an empty allowlist or delete the secret.
 
 Deploy again so the Functions runtime sees the new secret:
 

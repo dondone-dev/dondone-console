@@ -39,10 +39,10 @@ VITE_AUTH_BASE=https://auth.dondone.dev
 VITE_AUTH_CLIENT_ID=console
 ```
 
-这个环境变量需要在 Cloudflare Pages 中手动设置，因为仓库里默认故意留空：
+因为 `wrangler.toml` 会作为 Pages 配置源，bootstrap 邮箱白名单建议用 Pages secret 设置：
 
 ```sh
-CONSOLE_BOOTSTRAP_EMAILS=you@example.com
+echo "you@example.com" | pnpm wrangler pages secret put CONSOLE_BOOTSTRAP_EMAILS --project-name dondone-console
 ```
 
 这个 secret 必须手动设置，不能提交到仓库：
@@ -89,7 +89,13 @@ Pages 项目创建后，再设置 service role key：
 echo "sb_secret_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" | pnpm wrangler pages secret put SUPABASE_SERVICE_ROLE_KEY --project-name dondone-console
 ```
 
-在 Cloudflare Pages Dashboard 的项目环境变量中设置 `CONSOLE_BOOTSTRAP_EMAILS`。
+Pages 项目创建后，设置 bootstrap 邮箱白名单：
+
+```sh
+echo "you@example.com" | pnpm wrangler pages secret put CONSOLE_BOOTSTRAP_EMAILS --project-name dondone-console
+```
+
+第一个管理员初始化完成后，可以把这个值轮换为空白名单，或者删除这个 secret。
 
 再次部署，让 Functions runtime 读取新的 secret：
 
