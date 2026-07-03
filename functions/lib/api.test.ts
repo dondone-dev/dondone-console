@@ -131,6 +131,36 @@ describe('console api', () => {
     })
   })
 
+  it('returns invalid_token only when Supabase token verification fails', async () => {
+    const response = await handleConsoleApi(
+      request('/api/me', { headers: auth('bad-token') }),
+      env,
+      store({
+        getUser: async () => {
+          throw new Error('invalid token')
+        },
+      })
+    )
+
+    expect(response.status).toBe(401)
+    expect(await response.json()).toEqual({ error: 'invalid_token' })
+  })
+
+  it('does not report database setup failures as expired sessions', async () => {
+    const response = await handleConsoleApi(
+      request('/api/me', { headers: auth() }),
+      env,
+      store({
+        ensureProfile: async () => {
+          throw new Error('profiles table missing')
+        },
+      })
+    )
+
+    expect(response.status).toBe(500)
+    expect(await response.json()).toEqual({ error: 'internal_error' })
+  })
+
   it('rejects non-admin users from admin endpoints', async () => {
     const response = await handleConsoleApi(
       request('/api/users', { headers: auth('user-token') }),

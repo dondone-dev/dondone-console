@@ -1,5 +1,16 @@
 import type { Session } from './auth'
 
+export class ApiClientError extends Error {
+  readonly status: number
+  readonly error: string
+
+  constructor(status: number, error: string) {
+    super(error)
+    this.status = status
+    this.error = error
+  }
+}
+
 export interface MeResponse {
   user: { id: string; email?: string }
   profile: Profile | null
@@ -61,7 +72,10 @@ export async function apiFetch<T>(
   })
   const body = await response.json()
   if (!response.ok) {
-    throw new Error(body.message ?? body.error ?? 'Request failed.')
+    throw new ApiClientError(
+      response.status,
+      body.message ?? body.error ?? 'request_failed'
+    )
   }
   return body as T
 }

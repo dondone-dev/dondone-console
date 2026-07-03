@@ -23,6 +23,7 @@ export async function handleConsoleApi(
     const url = new URL(request.url)
     const path = url.pathname.replace(/^\/api\/?/, '')
     const auth = await requireUser(request, store)
+    await store.ensureProfile(auth.user)
 
     if (request.method === 'GET' && path === 'me') {
       return jsonResponse(request, await mePayload(store, auth.user))
@@ -134,7 +135,6 @@ async function requireUser(
 
   try {
     const user = await store.getUser(token)
-    await store.ensureProfile(user)
     return { user }
   } catch {
     throw new ApiError(401, 'invalid_token')

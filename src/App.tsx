@@ -19,6 +19,7 @@ import {
   type Session,
 } from '@/lib/auth'
 import {
+  ApiClientError,
   apiFetch,
   type MeResponse,
   type Profile,
@@ -128,10 +129,16 @@ function ConsoleApp() {
   }
 
   if (me.isError) {
+    const error = me.error
+    const isExpired = error instanceof ApiClientError && error.status === 401
     return (
       <CenteredState
-        title="Session expired"
-        description="Sign in again to continue."
+        title={isExpired ? 'Session expired' : 'Console setup error'}
+        description={
+          isExpired
+            ? 'Sign in again to continue.'
+            : `The Console API could not load your account. Check SUPABASE_SERVICE_ROLE_KEY, SUPABASE_PUBLISHABLE_KEY, and SQL migration status. (${error instanceof Error ? error.message : 'unknown_error'})`
+        }
         action={
           <Button
             onClick={() => {
