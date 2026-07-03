@@ -37,7 +37,11 @@ SUPABASE_URL=https://ttmrvhkmqljulrptviow.supabase.co
 SUPABASE_PUBLISHABLE_KEY=<supabase-publishable-key>
 SUPABASE_SERVICE_ROLE_KEY=<supabase-service-role-secret>
 CONSOLE_BOOTSTRAP_EMAILS=you@example.com
+VITE_AUTH_BASE=https://auth.dondone.dev
+VITE_AUTH_CLIENT_ID=console
 ```
+
+非敏感默认值也已经写在 `wrangler.toml` 中；如果生产环境需要不同值，例如 `CONSOLE_BOOTSTRAP_EMAILS`，再到 Cloudflare Pages 中覆盖。
 
 使用 Pages secret 设置 service role key：
 
