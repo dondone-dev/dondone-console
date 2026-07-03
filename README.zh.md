@@ -28,22 +28,24 @@ VITE_AUTH_CLIENT_ID=console
 }
 ```
 
-## Functions 环境变量
+## 环境变量
 
-在 Cloudflare Pages 中配置：
+这些非敏感默认值已经写在 `wrangler.toml` 中，通常不需要在 Cloudflare Dashboard 里手动重复添加：
 
 ```sh
 SUPABASE_URL=https://ttmrvhkmqljulrptviow.supabase.co
 SUPABASE_PUBLISHABLE_KEY=<supabase-publishable-key>
-SUPABASE_SERVICE_ROLE_KEY=<supabase-service-role-secret>
-CONSOLE_BOOTSTRAP_EMAILS=you@example.com
 VITE_AUTH_BASE=https://auth.dondone.dev
 VITE_AUTH_CLIENT_ID=console
 ```
 
-非敏感默认值也已经写在 `wrangler.toml` 中；如果生产环境需要不同值，例如 `CONSOLE_BOOTSTRAP_EMAILS`，再到 Cloudflare Pages 中覆盖。
+这个环境变量需要在 Cloudflare Pages 中手动设置，因为仓库里默认故意留空：
 
-使用 Pages secret 设置 service role key：
+```sh
+CONSOLE_BOOTSTRAP_EMAILS=you@example.com
+```
+
+这个 secret 必须手动设置，不能提交到仓库：
 
 ```sh
 echo "sb_secret_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" | pnpm wrangler pages secret put SUPABASE_SERVICE_ROLE_KEY --project-name dondone-console
@@ -66,17 +68,32 @@ Production branch: main
 Custom domain: console.dondone.dev
 ```
 
-部署前先设置 service role key：
+如果使用命令行部署，先登录 Cloudflare：
+
+```sh
+pnpm wrangler login
+```
+
+如果 Pages 项目还不存在，先通过第一次部署创建项目：
+
+```sh
+pnpm install
+pnpm test
+pnpm build
+pnpm wrangler pages deploy dist --project-name dondone-console
+```
+
+Pages 项目创建后，再设置 service role key：
 
 ```sh
 echo "sb_secret_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" | pnpm wrangler pages secret put SUPABASE_SERVICE_ROLE_KEY --project-name dondone-console
 ```
 
-使用 Wrangler 手动构建并部署：
+在 Cloudflare Pages Dashboard 的项目环境变量中设置 `CONSOLE_BOOTSTRAP_EMAILS`。
+
+再次部署，让 Functions runtime 读取新的 secret：
 
 ```sh
-pnpm install
-pnpm test
 pnpm build
 pnpm wrangler pages deploy dist --project-name dondone-console
 ```

@@ -28,22 +28,24 @@ Register the client in `dondone-auth`:
 }
 ```
 
-## Functions Environment
+## Environment
 
-Configure these in Cloudflare Pages:
+These non-sensitive defaults are already tracked in `wrangler.toml`, so you usually do not need to add them manually in the Cloudflare dashboard:
 
 ```sh
 SUPABASE_URL=https://ttmrvhkmqljulrptviow.supabase.co
 SUPABASE_PUBLISHABLE_KEY=<supabase-publishable-key>
-SUPABASE_SERVICE_ROLE_KEY=<supabase-service-role-secret>
-CONSOLE_BOOTSTRAP_EMAILS=you@example.com
 VITE_AUTH_BASE=https://auth.dondone.dev
 VITE_AUTH_CLIENT_ID=console
 ```
 
-Non-sensitive defaults are also tracked in `wrangler.toml`; set production-only values such as `CONSOLE_BOOTSTRAP_EMAILS` in Cloudflare Pages if they differ from the file.
+Set this environment variable manually in Cloudflare Pages because the repository default is intentionally empty:
 
-Set the service role key as a Pages secret:
+```sh
+CONSOLE_BOOTSTRAP_EMAILS=you@example.com
+```
+
+Set this secret manually. Do not commit it:
 
 ```sh
 echo "sb_secret_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" | pnpm wrangler pages secret put SUPABASE_SERVICE_ROLE_KEY --project-name dondone-console
@@ -66,17 +68,32 @@ Production branch: main
 Custom domain: console.dondone.dev
 ```
 
-Set the service role key before deploying:
+For CLI deployment, first log in to Cloudflare:
+
+```sh
+pnpm wrangler login
+```
+
+If the Pages project does not exist yet, create it with the first deploy:
+
+```sh
+pnpm install
+pnpm test
+pnpm build
+pnpm wrangler pages deploy dist --project-name dondone-console
+```
+
+After the Pages project exists, set the service role key:
 
 ```sh
 echo "sb_secret_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" | pnpm wrangler pages secret put SUPABASE_SERVICE_ROLE_KEY --project-name dondone-console
 ```
 
-Build and deploy manually with Wrangler:
+Set `CONSOLE_BOOTSTRAP_EMAILS` in the Cloudflare Pages dashboard under project environment variables.
+
+Deploy again so the Functions runtime sees the new secret:
 
 ```sh
-pnpm install
-pnpm test
 pnpm build
 pnpm wrangler pages deploy dist --project-name dondone-console
 ```
