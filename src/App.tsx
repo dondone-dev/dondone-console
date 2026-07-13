@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import { RefreshCw, ShieldAlert } from 'lucide-react'
 import { clearSession, loadSession, type Session } from '@/lib/auth'
 import { ApiClientError, apiFetch, type MeResponse } from '@/lib/api'
@@ -49,17 +49,10 @@ export default function App() {
 }
 
 function ConsoleGate({ session, signOut }: { session: Session; signOut: () => void }) {
-  const queryClient = useQueryClient()
-
   const me = useQuery({
     queryKey: ['me', session.accessToken],
     queryFn: () => apiFetch<MeResponse>(session, '/api/me'),
     retry: false,
-  })
-
-  const bootstrap = useMutation({
-    mutationFn: () => apiFetch<{ ok: boolean }>(session, '/api/bootstrap', { method: 'POST' }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['me'] }),
   })
 
   if (me.isLoading) {
@@ -94,12 +87,7 @@ function ConsoleGate({ session, signOut }: { session: Session; signOut: () => vo
         description="This account is not a Console administrator."
         action={
           <div className="flex gap-2">
-            <Button
-              variant="outline"
-              onClick={() => bootstrap.mutate()}
-              disabled={bootstrap.isPending}
-            >
-              {bootstrap.isPending && <RefreshCw className="animate-spin" />}
+            <Button variant="outline" disabled>
               Initialize admin access
             </Button>
             <Button variant="ghost" onClick={signOut}>
