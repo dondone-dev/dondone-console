@@ -71,6 +71,7 @@ export async function handleConsoleApi(
           key: stringField(body, 'key'),
           name: stringField(body, 'name'),
           description: optionalStringField(body, 'description'),
+          redirect_uris: requireStringArray(body, 'redirect_uris'),
         }),
         { status: 201 }
       )
@@ -101,6 +102,20 @@ export async function handleConsoleApi(
           description: optionalStringField(body, 'description'),
           status: enumField(body, 'status', ['active', 'disabled']),
           permission_keys: stringArrayField(body, 'permission_keys'),
+        })
+      )
+    }
+
+    const updateServiceMatch = path.match(/^services\/([^/]+)$/)
+    if (request.method === 'PUT' && updateServiceMatch) {
+      const body = await readJsonObject(request)
+      return jsonResponse(
+        request,
+        await store.updateService(updateServiceMatch[1], {
+          name: stringField(body, 'name'),
+          description: optionalStringField(body, 'description'),
+          status: enumField(body, 'status', ['active', 'disabled']),
+          redirect_uris: requireStringArray(body, 'redirect_uris'),
         })
       )
     }
@@ -233,6 +248,14 @@ function optionalStringField(
   const value = body[key]
   if (value === undefined || value === null || value === '') return null
   if (typeof value !== 'string') throw new ApiError(400, 'invalid_field')
+  return value
+}
+
+function requireStringArray(body: Record<string, unknown>, key: string): string[] {
+  const value = body[key]
+  if (!Array.isArray(value) || !value.every((item): item is string => typeof item === 'string')) {
+    throw new ApiError(400, 'invalid_field', `${key} must be an array of strings.`)
+  }
   return value
 }
 

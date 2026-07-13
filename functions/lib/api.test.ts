@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { handleConsoleApi } from './api'
+import { ApiError } from './types'
 import type {
   ConsoleEnv,
   ConsoleStore,
@@ -43,6 +44,7 @@ const services: Service[] = [
     name: 'Console',
     description: null,
     status: 'active',
+    redirect_uris: ['https://console.dondone.dev/auth/callback'],
     groups: [
       {
         id: 'group-console-admin',
@@ -87,6 +89,15 @@ function store(overrides: Partial<ConsoleStore> = {}): ConsoleStore {
       name: input.name,
       description: input.description,
       status: 'active',
+      redirect_uris: input.redirect_uris,
+      groups: [],
+    }),
+    updateService: async (key, input) => ({
+      key,
+      name: input.name,
+      description: input.description,
+      status: input.status,
+      redirect_uris: input.redirect_uris,
       groups: [],
     }),
     createGroup: async () => services[0],
@@ -248,6 +259,98 @@ describe('console api', () => {
 
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({ services })
+  })
+
+  it('updates a service, including its redirect URIs, for admins', async () => {
+    let received: unknown
+    const response = await handleConsoleApi(
+      request('/api/services/time', {
+        method: 'PUT',
+        headers: { ...auth(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'Local Time',
+          description: 'Example app using Dondone Auth.',
+          status: 'active',
+          redirect_uris: ['https://time.dondone.dev/auth/callback'],
+        }),
+      }),
+      env,
+      store({
+        updateService: async (key, input) => {
+          received = { key, input }
+          return {
+            key,
+            name: input.name,
+            description: input.description,
+            status: input.status,
+            redirect_uris: input.redirect_uris,
+            groups: [],
+          }
+        },
+      })
+    )
+
+    expect(response.status).toBe(200)
+    expect(received).toEqual({
+      key: 'time',
+      input: {
+        name: 'Local Time',
+        description: 'Example app using Dondone Auth.',
+        status: 'active',
+        redirect_uris: ['https://time.dondone.dev/auth/callback'],
+      },
+    })
+    expect(await response.json()).toEqual({
+      key: 'time',
+      name: 'Local Time',
+      description: 'Example app using Dondone Auth.',
+      status: 'active',
+      redirect_uris: ['https://time.dondone.dev/auth/callback'],
+      groups: [],
+    })
+  })
+
+  it('rejects a malformed redirect_uris field instead of silently clearing it', async () => {
+    const response = await handleConsoleApi(
+      request('/api/services/time', {
+        method: 'PUT',
+        headers: { ...auth(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'Local Time',
+          description: null,
+          status: 'active',
+          redirect_uris: 'https://time.dondone.dev/auth/callback',
+        }),
+      }),
+      env,
+      store()
+    )
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toMatchObject({ error: 'invalid_field' })
+  })
+
+  it('surfaces a 404 when a store reports an unknown service, instead of a raw 500', async () => {
+    const response = await handleConsoleApi(
+      request('/api/services/unknown', {
+        method: 'PUT',
+        headers: { ...auth(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'Ghost',
+          description: null,
+          status: 'active',
+          redirect_uris: [],
+        }),
+      }),
+      env,
+      store({
+        updateService: async () => {
+          throw new ApiError(404, 'not_found')
+        },
+      })
+    )
+
+    expect(response.status).toBe(404)
   })
 
   it('maps a foreign-key violation from the store into a 400 instead of a raw 500', async () => {
