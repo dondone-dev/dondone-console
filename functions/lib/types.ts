@@ -1,3 +1,14 @@
+export class ApiError extends Error {
+  readonly status: number
+  readonly error: string
+
+  constructor(status: number, error: string, message?: string) {
+    super(message ?? error)
+    this.status = status
+    this.error = error
+  }
+}
+
 export interface ConsoleEnv {
   SUPABASE_URL: string
   SUPABASE_PUBLISHABLE_KEY: string

@@ -1,11 +1,12 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
-import type {
-  ConsoleEnv,
-  ConsoleStore,
-  PermissionGroup,
-  Profile,
-  Service,
-  UserGroupGrant,
+import {
+  ApiError,
+  type ConsoleEnv,
+  type ConsoleStore,
+  type PermissionGroup,
+  type Profile,
+  type Service,
+  type UserGroupGrant,
 } from './types'
 
 type DbClient = SupabaseClient<any, any, any, any, any>
@@ -208,6 +209,7 @@ export function createConsoleStore(env: ConsoleEnv): ConsoleStore {
     },
 
     async createGroup(serviceKey, input) {
+      await assertPermissionKeysExist(admin, input.permission_keys)
       const { data: group, error } = await admin
         .from('permission_groups')
         .insert({
@@ -224,6 +226,7 @@ export function createConsoleStore(env: ConsoleEnv): ConsoleStore {
     },
 
     async updateGroup(serviceKey, groupKey, input) {
+      await assertPermissionKeysExist(admin, input.permission_keys)
       const { data: group, error } = await admin
         .from('permission_groups')
         .update({
@@ -274,6 +277,29 @@ async function listUserGroups(
     .returns<UserGroupGrant[]>()
   if (error) throw error
   return data ?? []
+}
+
+async function assertPermissionKeysExist(
+  admin: DbClient,
+  permissionKeys: string[]
+): Promise<void> {
+  if (permissionKeys.length === 0) return
+  const requested = [...new Set(permissionKeys)]
+  const { data, error } = await admin
+    .from('permissions')
+    .select('key')
+    .in('key', requested)
+    .returns<Array<{ key: string }>>()
+  if (error) throw error
+  const found = new Set((data ?? []).map((row) => row.key))
+  const missing = requested.filter((key) => !found.has(key))
+  if (missing.length > 0) {
+    throw new ApiError(
+      400,
+      'unknown_permission_keys',
+      `Unknown permission key(s): ${missing.join(', ')}. Create them in the permissions table before attaching to a group.`
+    )
+  }
 }
 
 async function replaceGroupPermissions(

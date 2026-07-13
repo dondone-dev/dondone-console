@@ -249,4 +249,35 @@ describe('console api', () => {
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({ services })
   })
+
+  it('maps a foreign-key violation from the store into a 400 instead of a raw 500', async () => {
+    const response = await handleConsoleApi(
+      request('/api/services/api/groups', {
+        method: 'POST',
+        headers: { ...auth(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          key: 'plus',
+          name: 'Plus',
+          description: null,
+          permission_keys: ['tier:lowb_vip'],
+        }),
+      }),
+      env,
+      store({
+        createGroup: async () => {
+          throw {
+            code: '23503',
+            message: 'insert or update on table "permission_group_permissions" violates foreign key constraint',
+            details: 'Key (permission_key)=(tier:lowb_vip) is not present in table "permissions".',
+          }
+        },
+      })
+    )
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({
+      error: 'invalid_reference',
+      message: 'Key (permission_key)=(tier:lowb_vip) is not present in table "permissions".',
+    })
+  })
 })

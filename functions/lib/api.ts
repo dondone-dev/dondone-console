@@ -1,16 +1,5 @@
 import { createConsoleStore } from './store'
-import type { ConsoleEnv, ConsoleStore, SupabaseUser } from './types'
-
-class ApiError extends Error {
-  readonly status: number
-  readonly error: string
-
-  constructor(status: number, error: string) {
-    super(error)
-    this.status = status
-    this.error = error
-  }
-}
+import { ApiError, type ConsoleEnv, type ConsoleStore, type SupabaseUser } from './types'
 
 export async function handleConsoleApi(
   request: Request,
@@ -118,11 +107,34 @@ export async function handleConsoleApi(
 
     throw new ApiError(404, 'not_found')
   } catch (error) {
-    if (error instanceof ApiError) {
-      return jsonResponse(request, { error: error.error }, { status: error.status })
+    const apiError = error instanceof ApiError ? error : mapDbError(error)
+    if (apiError) {
+      const body: { error: string; message?: string } = { error: apiError.error }
+      if (apiError.message !== apiError.error) body.message = apiError.message
+      return jsonResponse(request, body, { status: apiError.status })
     }
     return jsonResponse(request, { error: 'internal_error' }, { status: 500 })
   }
+}
+
+function mapDbError(error: unknown): ApiError | null {
+  const pgError = error as { code?: string; message?: string; details?: string } | null
+  if (!pgError || typeof pgError.code !== 'string') return null
+  if (pgError.code === '23503') {
+    return new ApiError(
+      400,
+      'invalid_reference',
+      pgError.details ?? pgError.message ?? 'A referenced record does not exist.'
+    )
+  }
+  if (pgError.code === '23505') {
+    return new ApiError(
+      409,
+      'already_exists',
+      pgError.details ?? pgError.message ?? 'A record with this key already exists.'
+    )
+  }
+  return null
 }
 
 async function requireUser(
