@@ -46,6 +46,7 @@ export interface Service {
   name: string
   description: string | null
   status: 'active' | 'disabled'
+  redirect_uris: string[]
   groups: PermissionGroup[]
 }
 
@@ -86,6 +87,13 @@ export interface ConsoleStore {
     key: string
     name: string
     description: string | null
+    redirect_uris: string[]
+  }): Promise<Service>
+  updateService(key: string, input: {
+    name: string
+    description: string | null
+    status: 'active' | 'disabled'
+    redirect_uris: string[]
   }): Promise<Service>
   createGroup(serviceKey: string, input: {
     key: string

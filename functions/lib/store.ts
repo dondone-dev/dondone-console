@@ -8,6 +8,7 @@ import {
   type Service,
   type UserGroupGrant,
 } from './types'
+import { assertValidRedirectUris, assertValidServiceKey, requireFoundRow } from './validation'
 
 type DbClient = SupabaseClient<any, any, any, any, any>
 
@@ -29,6 +30,7 @@ interface ServiceRow {
   name: string
   description: string | null
   status: 'active' | 'disabled'
+  redirect_uris: string[]
   permission_groups?: PermissionGroupRow[]
 }
 
@@ -190,7 +192,7 @@ export function createConsoleStore(env: ConsoleEnv): ConsoleStore {
       const { data, error } = await admin
         .from('services')
         .select(
-          'key,name,description,status,permission_groups(id,service_key,key,name,description,status,is_system,permission_group_permissions(permissions(key)))'
+          'key,name,description,status,redirect_uris,permission_groups(id,service_key,key,name,description,status,is_system,permission_group_permissions(permissions(key)))'
         )
         .order('key')
         .returns<ServiceRow[]>()
@@ -199,13 +201,33 @@ export function createConsoleStore(env: ConsoleEnv): ConsoleStore {
     },
 
     async createService(input) {
+      assertValidServiceKey(input.key)
+      assertValidRedirectUris(input.redirect_uris)
       const { error } = await admin.from('services').insert({
         key: input.key,
         name: input.name,
         description: input.description,
+        redirect_uris: input.redirect_uris,
       })
       if (error) throw error
       return serviceByKey(admin, input.key)
+    },
+
+    async updateService(key, input) {
+      assertValidRedirectUris(input.redirect_uris)
+      const { data, error } = await admin
+        .from('services')
+        .update({
+          name: input.name,
+          description: input.description,
+          status: input.status,
+          redirect_uris: input.redirect_uris,
+        })
+        .eq('key', key)
+        .select('key')
+        .maybeSingle<{ key: string }>()
+      requireFoundRow(data, error)
+      return serviceByKey(admin, key)
     },
 
     async createGroup(serviceKey, input) {
@@ -325,7 +347,7 @@ async function serviceByKey(
   const { data, error } = await admin
     .from('services')
     .select(
-      'key,name,description,status,permission_groups(id,service_key,key,name,description,status,is_system,permission_group_permissions(permissions(key)))'
+      'key,name,description,status,redirect_uris,permission_groups(id,service_key,key,name,description,status,is_system,permission_group_permissions(permissions(key)))'
     )
     .eq('key', serviceKey)
     .single<ServiceRow>()
@@ -339,6 +361,7 @@ function mapService(row: ServiceRow): Service {
     name: row.name,
     description: row.description,
     status: row.status,
+    redirect_uris: row.redirect_uris ?? [],
     groups: (row.permission_groups ?? []).map(mapGroup),
   }
 }
