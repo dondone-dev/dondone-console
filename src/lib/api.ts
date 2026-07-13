@@ -43,6 +43,7 @@ export interface Service {
   name: string
   description: string | null
   status: 'active' | 'disabled'
+  redirect_uris: string[]
   groups: PermissionGroup[]
 }
 

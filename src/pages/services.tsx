@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Boxes, Plus, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
@@ -36,6 +36,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Textarea } from '@/components/ui/textarea'
 
 export function ServicesPage() {
   const { session } = useConsole()
@@ -85,6 +86,7 @@ export function ServicesPage() {
               </CardAction>
             </CardHeader>
             <CardContent className="grid gap-3">
+              <ServiceEditor session={session} service={service} />
               {service.groups.length === 0 && (
                 <p className="text-sm text-muted-foreground">No permission groups yet.</p>
               )}
@@ -105,13 +107,19 @@ function CreateServiceDialog({ session }: { session: Session }) {
   const [key, setKey] = useState('')
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
+  const [redirectUris, setRedirectUris] = useState('')
 
   const create = useMutation({
     mutationFn: () =>
       apiFetch<Service>(session, '/api/services', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key, name, description: description || null }),
+        body: JSON.stringify({
+          key,
+          name,
+          description: description || null,
+          redirect_uris: splitLines(redirectUris),
+        }),
       }),
     onSuccess: () => {
       toast.success(`Service "${name}" created`)
@@ -119,6 +127,7 @@ function CreateServiceDialog({ session }: { session: Session }) {
       setKey('')
       setName('')
       setDescription('')
+      setRedirectUris('')
       void queryClient.invalidateQueries({ queryKey: ['services'] })
     },
     onError: (error) =>
@@ -168,6 +177,16 @@ function CreateServiceDialog({ session }: { session: Session }) {
               onChange={(e) => setDescription(e.target.value)}
             />
           </div>
+          <div className="grid gap-2">
+            <Label htmlFor="service-redirect-uris">Callback URLs</Label>
+            <Textarea
+              id="service-redirect-uris"
+              className="font-mono"
+              placeholder={'One per line, e.g.\nhttps://time.dondone.dev/auth/callback'}
+              value={redirectUris}
+              onChange={(e) => setRedirectUris(e.target.value)}
+            />
+          </div>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)}>
@@ -180,6 +199,109 @@ function CreateServiceDialog({ session }: { session: Session }) {
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  )
+}
+
+function ServiceEditor({ session, service }: { session: Session; service: Service }) {
+  const queryClient = useQueryClient()
+  const [name, setName] = useState(service.name)
+  const [description, setDescription] = useState(service.description ?? '')
+  const [status, setStatus] = useState(service.status)
+  const [redirectUris, setRedirectUris] = useState(service.redirect_uris.join('\n'))
+
+  /* eslint-disable react-hooks/set-state-in-effect -- intentional prop-to-state sync for display freshness after background refetch */
+  useEffect(() => {
+    setName(service.name)
+    setDescription(service.description ?? '')
+    setStatus(service.status)
+    setRedirectUris(service.redirect_uris.join('\n'))
+  }, [service])
+  /* eslint-enable react-hooks/set-state-in-effect */
+
+  const dirty =
+    name !== service.name ||
+    description !== (service.description ?? '') ||
+    status !== service.status ||
+    redirectUris !== service.redirect_uris.join('\n')
+
+  const update = useMutation({
+    mutationFn: () =>
+      apiFetch<Service>(session, `/api/services/${service.key}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name,
+          description: description || null,
+          status,
+          redirect_uris: splitLines(redirectUris),
+        }),
+      }),
+    onSuccess: () => {
+      toast.success(`Service "${name}" saved`)
+      void queryClient.invalidateQueries({ queryKey: ['services'] })
+    },
+    onError: (error) =>
+      toast.error('Failed to save service', {
+        description: error instanceof Error ? error.message : undefined,
+      }),
+  })
+
+  return (
+    <div className="grid gap-3 rounded-lg border bg-muted/30 p-4 dark:bg-muted/10">
+      <div className="flex items-center justify-between gap-2">
+        <span className="flex items-center gap-1.5 font-mono text-xs text-muted-foreground">
+          <StatusDot active={status === 'active'} />
+          service settings
+        </span>
+        <Button size="sm" variant="secondary" onClick={() => update.mutate()} disabled={update.isPending || !name || !dirty}>
+          {update.isPending && <RefreshCw className="animate-spin" />}
+          {dirty ? 'Save' : 'Saved'}
+        </Button>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_140px]">
+        <div className="grid gap-1.5">
+          <Label htmlFor={`service-name-${service.key}`} className="text-xs text-muted-foreground">
+            Name
+          </Label>
+          <Input id={`service-name-${service.key}`} value={name} onChange={(e) => setName(e.target.value)} />
+        </div>
+        <div className="grid gap-1.5">
+          <Label className="text-xs text-muted-foreground">Status</Label>
+          <Select value={status} onValueChange={(value) => setStatus(value as 'active' | 'disabled')}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="active">Active</SelectItem>
+              <SelectItem value="disabled">Disabled</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      <div className="grid gap-1.5">
+        <Label htmlFor={`service-description-${service.key}`} className="text-xs text-muted-foreground">
+          Description
+        </Label>
+        <Input
+          id={`service-description-${service.key}`}
+          placeholder="Optional"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+        />
+      </div>
+      <div className="grid gap-1.5">
+        <Label htmlFor={`service-redirect-uris-${service.key}`} className="text-xs text-muted-foreground">
+          Callback URLs
+        </Label>
+        <Textarea
+          id={`service-redirect-uris-${service.key}`}
+          className="font-mono"
+          placeholder="One per line"
+          value={redirectUris}
+          onChange={(e) => setRedirectUris(e.target.value)}
+        />
+      </div>
+    </div>
   )
 }
 
@@ -379,4 +501,13 @@ function splitPermissionKeys(value: string): string[] {
     .split(',')
     .map((item) => item.trim())
     .filter(Boolean)
+}
+
+function splitLines(value: string): string[] {
+  const seen = new Set<string>()
+  for (const line of value.split('\n')) {
+    const trimmed = line.trim()
+    if (trimmed) seen.add(trimmed)
+  }
+  return [...seen]
 }
