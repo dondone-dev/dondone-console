@@ -144,3 +144,6 @@ vite.config.ts.timestamp-*
 
 # CodeGraph local index
 .codegraph/
+
+# Git worktrees
+.worktrees/
