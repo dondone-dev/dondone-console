@@ -1,22 +1,18 @@
-import { useEffect, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Boxes, Plus, RefreshCw } from 'lucide-react'
+import { Boxes, Pencil, Plus, RefreshCw, Search } from 'lucide-react'
 import { toast } from 'sonner'
 import { apiFetch, type Service } from '@/lib/api'
 import type { Session } from '@/lib/auth'
 import { useConsole } from '@/lib/console-context'
+import { paginate } from '@/lib/pagination'
+import { filterServices, type ServiceStatusFilter } from '@/lib/service-filters'
+import { EditServiceDialog } from '@/components/services/edit-service-dialog'
 import { PageHeader } from '@/components/page-header'
 import { EmptyState } from '@/components/empty-state'
 import { Badge, StatusDot } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import {
-  Card,
-  CardAction,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card'
+import { Card } from '@/components/ui/card'
 import {
   Dialog,
   DialogContent,
@@ -28,6 +24,7 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Pagination } from '@/components/ui/pagination'
 import {
   Select,
   SelectContent,
@@ -36,15 +33,54 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
 import { Textarea } from '@/components/ui/textarea'
+
+const PAGE_SIZE = 10
 
 export function ServicesPage() {
   const { session } = useConsole()
+  const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState<ServiceStatusFilter>('all')
+  const [page, setPage] = useState(1)
+  const [editingKey, setEditingKey] = useState<string | null>(null)
+
   const services = useQuery({
     queryKey: ['services'],
     queryFn: () => apiFetch<{ services: Service[] }>(session, '/api/services'),
   })
   const list = services.data?.services ?? []
+  const filtered = useMemo(() => filterServices(list, search, statusFilter), [list, search, statusFilter])
+  const {
+    items: pageItems,
+    page: currentPage,
+    pageCount,
+    total,
+  } = paginate(filtered, page, PAGE_SIZE)
+  const editingService = editingKey ? list.find((service) => service.key === editingKey) ?? null : null
+
+  function updateSearch(value: string) {
+    setSearch(value)
+    setPage(1)
+  }
+
+  function updateStatusFilter(value: ServiceStatusFilter) {
+    setStatusFilter(value)
+    setPage(1)
+  }
+
+  function clearFilters() {
+    setSearch('')
+    setStatusFilter('all')
+    setPage(1)
+  }
 
   return (
     <>
@@ -54,49 +90,148 @@ export function ServicesPage() {
         action={<CreateServiceDialog session={session} />}
       />
 
-      {services.isLoading && (
-        <div className="grid gap-4">
-          <Skeleton className="h-40 w-full rounded-xl" />
-          <Skeleton className="h-40 w-full rounded-xl" />
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative max-w-xs flex-1">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            className="pl-8"
+            placeholder="Search by name, key, or description"
+            value={search}
+            onChange={(e) => updateSearch(e.target.value)}
+          />
         </div>
-      )}
+        <Select value={statusFilter} onValueChange={(value) => updateStatusFilter(value as ServiceStatusFilter)}>
+          <SelectTrigger className="w-36">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All statuses</SelectItem>
+            <SelectItem value="active">Active</SelectItem>
+            <SelectItem value="disabled">Disabled</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
 
-      {services.isSuccess && list.length === 0 && (
-        <EmptyState
-          icon={<Boxes />}
-          title="No services yet"
-          description="Create your first service to start defining permission groups."
-          action={<CreateServiceDialog session={session} />}
+      <Card className="overflow-hidden py-0">
+        <Table>
+          <TableHeader>
+            <TableRow className="hover:bg-transparent">
+              <TableHead>Service</TableHead>
+              <TableHead className="w-28">Status</TableHead>
+              <TableHead className="w-28">Groups</TableHead>
+              <TableHead className="w-32">Callback URLs</TableHead>
+              <TableHead className="w-16" />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {services.isLoading &&
+              Array.from({ length: 5 }, (_, index) => (
+                <TableRow key={index}>
+                  <TableCell><Skeleton className="h-4 w-48" /></TableCell>
+                  <TableCell><Skeleton className="h-4 w-16" /></TableCell>
+                  <TableCell><Skeleton className="h-4 w-16" /></TableCell>
+                  <TableCell><Skeleton className="h-4 w-16" /></TableCell>
+                  <TableCell><Skeleton className="h-4 w-8" /></TableCell>
+                </TableRow>
+              ))}
+            {services.isError && (
+              <TableRow className="hover:bg-transparent">
+                <TableCell colSpan={5} className="py-8 text-center text-sm text-muted-foreground">
+                  Failed to load services.
+                  <Button variant="link" size="sm" onClick={() => void services.refetch()}>
+                    Retry
+                  </Button>
+                </TableCell>
+              </TableRow>
+            )}
+            {services.isSuccess && list.length === 0 && (
+              <TableRow className="hover:bg-transparent">
+                <TableCell colSpan={5} className="p-0">
+                  <EmptyState
+                    className="rounded-none border-0"
+                    icon={<Boxes />}
+                    title="No services yet"
+                    description="Create your first service to start defining permission groups."
+                    action={<CreateServiceDialog session={session} />}
+                  />
+                </TableCell>
+              </TableRow>
+            )}
+            {services.isSuccess && list.length > 0 && filtered.length === 0 && (
+              <TableRow className="hover:bg-transparent">
+                <TableCell colSpan={5} className="py-8 text-center text-sm text-muted-foreground">
+                  No services match your filters.
+                  <Button variant="link" size="sm" onClick={clearFilters}>
+                    Clear filters
+                  </Button>
+                </TableCell>
+              </TableRow>
+            )}
+            {pageItems.map((service) => (
+              <TableRow key={service.key}>
+                <TableCell className="max-w-0">
+                  <div className="grid gap-0.5">
+                    <span className="flex items-center gap-2 font-medium">
+                      {service.name}
+                      <Badge variant="outline" className="font-mono font-normal text-muted-foreground">
+                        {service.key}
+                      </Badge>
+                    </span>
+                    <span className="truncate text-sm text-muted-foreground">
+                      {service.description ?? 'No description.'}
+                    </span>
+                  </div>
+                </TableCell>
+                <TableCell>
+                  <Badge variant="outline" className="capitalize text-muted-foreground">
+                    <StatusDot active={service.status === 'active'} />
+                    {service.status}
+                  </Badge>
+                </TableCell>
+                <TableCell className="text-muted-foreground">
+                  {service.groups.length} {service.groups.length === 1 ? 'group' : 'groups'}
+                </TableCell>
+                <TableCell className="text-muted-foreground">
+                  {service.redirect_uris.length} {service.redirect_uris.length === 1 ? 'URL' : 'URLs'}
+                </TableCell>
+                <TableCell>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    aria-label={`Edit ${service.name}`}
+                    onClick={() => setEditingKey(service.key)}
+                  >
+                    <Pencil />
+                  </Button>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </Card>
+
+      {total > 0 && (
+        <Pagination
+          page={currentPage}
+          pageCount={pageCount}
+          total={total}
+          pageSize={PAGE_SIZE}
+          onPageChange={setPage}
+          itemLabel="services"
         />
       )}
 
-      <div className="grid gap-4">
-        {list.map((service) => (
-          <Card key={service.key}>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                {service.name}
-                <Badge variant="outline" className="font-mono font-normal text-muted-foreground">
-                  {service.key}
-                </Badge>
-              </CardTitle>
-              <CardDescription>{service.description ?? 'No description.'}</CardDescription>
-              <CardAction>
-                <CreateGroupDialog session={session} service={service} />
-              </CardAction>
-            </CardHeader>
-            <CardContent className="grid gap-3">
-              <ServiceEditor session={session} service={service} />
-              {service.groups.length === 0 && (
-                <p className="text-sm text-muted-foreground">No permission groups yet.</p>
-              )}
-              {service.groups.map((group) => (
-                <GroupEditor key={group.id} session={session} service={service} group={group} />
-              ))}
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+      {editingService && (
+        <EditServiceDialog
+          key={editingService.key}
+          session={session}
+          service={editingService}
+          open
+          onOpenChange={(open) => {
+            if (!open) setEditingKey(null)
+          }}
+        />
+      )}
     </>
   )
 }
@@ -200,307 +335,6 @@ function CreateServiceDialog({ session }: { session: Session }) {
       </DialogContent>
     </Dialog>
   )
-}
-
-function ServiceEditor({ session, service }: { session: Session; service: Service }) {
-  const queryClient = useQueryClient()
-  const [name, setName] = useState(service.name)
-  const [description, setDescription] = useState(service.description ?? '')
-  const [status, setStatus] = useState(service.status)
-  const [redirectUris, setRedirectUris] = useState(service.redirect_uris.join('\n'))
-
-  /* eslint-disable react-hooks/set-state-in-effect -- intentional prop-to-state sync for display freshness after background refetch */
-  useEffect(() => {
-    setName(service.name)
-    setDescription(service.description ?? '')
-    setStatus(service.status)
-    setRedirectUris(service.redirect_uris.join('\n'))
-  }, [service])
-  /* eslint-enable react-hooks/set-state-in-effect */
-
-  const dirty =
-    name !== service.name ||
-    description !== (service.description ?? '') ||
-    status !== service.status ||
-    redirectUris !== service.redirect_uris.join('\n')
-
-  const update = useMutation({
-    mutationFn: () =>
-      apiFetch<Service>(session, `/api/services/${service.key}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name,
-          description: description || null,
-          status,
-          redirect_uris: splitLines(redirectUris),
-        }),
-      }),
-    onSuccess: () => {
-      toast.success(`Service "${name}" saved`)
-      void queryClient.invalidateQueries({ queryKey: ['services'] })
-    },
-    onError: (error) =>
-      toast.error('Failed to save service', {
-        description: error instanceof Error ? error.message : undefined,
-      }),
-  })
-
-  return (
-    <div className="grid gap-3 rounded-lg border bg-muted/30 p-4 dark:bg-muted/10">
-      <div className="flex items-center justify-between gap-2">
-        <span className="flex items-center gap-1.5 font-mono text-xs text-muted-foreground">
-          <StatusDot active={status === 'active'} />
-          service settings
-        </span>
-        <Button size="sm" variant="secondary" onClick={() => update.mutate()} disabled={update.isPending || !name || !dirty}>
-          {update.isPending && <RefreshCw className="animate-spin" />}
-          {dirty ? 'Save' : 'Saved'}
-        </Button>
-      </div>
-      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_140px]">
-        <div className="grid gap-1.5">
-          <Label htmlFor={`service-name-${service.key}`} className="text-xs text-muted-foreground">
-            Name
-          </Label>
-          <Input id={`service-name-${service.key}`} value={name} onChange={(e) => setName(e.target.value)} />
-        </div>
-        <div className="grid gap-1.5">
-          <Label className="text-xs text-muted-foreground">Status</Label>
-          <Select value={status} onValueChange={(value) => setStatus(value as 'active' | 'disabled')}>
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="active">Active</SelectItem>
-              <SelectItem value="disabled">Disabled</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
-      <div className="grid gap-1.5">
-        <Label htmlFor={`service-description-${service.key}`} className="text-xs text-muted-foreground">
-          Description
-        </Label>
-        <Input
-          id={`service-description-${service.key}`}
-          placeholder="Optional"
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-        />
-      </div>
-      <div className="grid gap-1.5">
-        <Label htmlFor={`service-redirect-uris-${service.key}`} className="text-xs text-muted-foreground">
-          Callback URLs
-        </Label>
-        <Textarea
-          id={`service-redirect-uris-${service.key}`}
-          className="font-mono"
-          placeholder="One per line"
-          value={redirectUris}
-          onChange={(e) => setRedirectUris(e.target.value)}
-        />
-      </div>
-    </div>
-  )
-}
-
-function CreateGroupDialog({ session, service }: { session: Session; service: Service }) {
-  const queryClient = useQueryClient()
-  const [open, setOpen] = useState(false)
-  const [key, setKey] = useState('')
-  const [name, setName] = useState('')
-  const [permissions, setPermissions] = useState('')
-
-  const create = useMutation({
-    mutationFn: () =>
-      apiFetch<Service>(session, `/api/services/${service.key}/groups`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          key,
-          name,
-          description: null,
-          permission_keys: splitPermissionKeys(permissions),
-        }),
-      }),
-    onSuccess: () => {
-      toast.success(`Group "${name}" created`)
-      setOpen(false)
-      setKey('')
-      setName('')
-      setPermissions('')
-      void queryClient.invalidateQueries({ queryKey: ['services'] })
-    },
-    onError: (error) =>
-      toast.error('Failed to create group', {
-        description: error instanceof Error ? error.message : undefined,
-      }),
-  })
-
-  return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button variant="outline" size="sm">
-          <Plus />
-          Add group
-        </Button>
-      </DialogTrigger>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Create group in {service.name}</DialogTitle>
-          <DialogDescription>Attach permission keys to a new group.</DialogDescription>
-        </DialogHeader>
-        <div className="grid gap-4">
-          <div className="grid gap-2">
-            <Label htmlFor="group-key">Key</Label>
-            <Input
-              id="group-key"
-              placeholder="e.g. premium"
-              value={key}
-              onChange={(e) => setKey(e.target.value)}
-            />
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="group-name">Name</Label>
-            <Input
-              id="group-name"
-              placeholder="e.g. Premium tier"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-            />
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="group-permissions">Permissions</Label>
-            <Input
-              id="group-permissions"
-              placeholder="Comma separated, e.g. api:echo, tier:vip"
-              value={permissions}
-              onChange={(e) => setPermissions(e.target.value)}
-            />
-          </div>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => setOpen(false)}>
-            Cancel
-          </Button>
-          <Button onClick={() => create.mutate()} disabled={!key || !name || create.isPending}>
-            {create.isPending && <RefreshCw className="animate-spin" />}
-            Create group
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
-function GroupEditor({
-  session,
-  service,
-  group,
-}: {
-  session: Session
-  service: Service
-  group: Service['groups'][number]
-}) {
-  const queryClient = useQueryClient()
-  const [name, setName] = useState(group.name)
-  const [description, setDescription] = useState(group.description ?? '')
-  const [status, setStatus] = useState(group.status)
-  const [permissions, setPermissions] = useState(group.permissions.join(', '))
-
-  const dirty =
-    name !== group.name ||
-    description !== (group.description ?? '') ||
-    status !== group.status ||
-    permissions !== group.permissions.join(', ')
-
-  const update = useMutation({
-    mutationFn: () =>
-      apiFetch<Service>(session, `/api/services/${service.key}/groups/${group.key}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name,
-          description: description || null,
-          status,
-          permission_keys: splitPermissionKeys(permissions),
-        }),
-      }),
-    onSuccess: () => {
-      toast.success(`Group "${name}" saved`)
-      void queryClient.invalidateQueries({ queryKey: ['services'] })
-    },
-    onError: (error) =>
-      toast.error('Failed to save group', {
-        description: error instanceof Error ? error.message : undefined,
-      }),
-  })
-
-  return (
-    <div className="grid gap-3 rounded-lg border bg-muted/30 p-4 dark:bg-muted/10">
-      <div className="flex items-center justify-between gap-2">
-        <span className="flex items-center gap-1.5 font-mono text-xs text-muted-foreground">
-          <StatusDot active={status === 'active'} />
-          {service.key}/{group.key}
-        </span>
-        <Button size="sm" variant="secondary" onClick={() => update.mutate()} disabled={update.isPending || !name || !dirty}>
-          {update.isPending && <RefreshCw className="animate-spin" />}
-          {dirty ? 'Save' : 'Saved'}
-        </Button>
-      </div>
-      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_140px]">
-        <div className="grid gap-1.5">
-          <Label htmlFor={`group-name-${group.id}`} className="text-xs text-muted-foreground">
-            Name
-          </Label>
-          <Input id={`group-name-${group.id}`} value={name} onChange={(e) => setName(e.target.value)} />
-        </div>
-        <div className="grid gap-1.5">
-          <Label className="text-xs text-muted-foreground">Status</Label>
-          <Select value={status} onValueChange={(value) => setStatus(value as 'active' | 'disabled')}>
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="active">Active</SelectItem>
-              <SelectItem value="disabled">Disabled</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
-      <div className="grid gap-1.5">
-        <Label htmlFor={`group-description-${group.id}`} className="text-xs text-muted-foreground">
-          Description
-        </Label>
-        <Input
-          id={`group-description-${group.id}`}
-          placeholder="Optional"
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-        />
-      </div>
-      <div className="grid gap-1.5">
-        <Label htmlFor={`group-permissions-${group.id}`} className="text-xs text-muted-foreground">
-          Permissions
-        </Label>
-        <Input
-          id={`group-permissions-${group.id}`}
-          className="font-mono"
-          placeholder="Comma separated"
-          value={permissions}
-          onChange={(e) => setPermissions(e.target.value)}
-        />
-      </div>
-    </div>
-  )
-}
-
-function splitPermissionKeys(value: string): string[] {
-  return value
-    .split(',')
-    .map((item) => item.trim())
-    .filter(Boolean)
 }
 
 function splitLines(value: string): string[] {
