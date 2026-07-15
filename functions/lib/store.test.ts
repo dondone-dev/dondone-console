@@ -112,6 +112,64 @@ describe('Console store capability grant RPC boundary', () => {
     await expect(store.getEffectivePermissions('user-1')).resolves.toEqual([])
   })
 
+  it('derives sorted unique permissions only from active unexpired group grants', async () => {
+    mocks.from.mockImplementation((table: string) => {
+      if (table === 'user_permissions') {
+        return resultQuery({
+          data: [{ permission_key: 'direct:legacy', status: 'active', expires_at: null }],
+          error: null,
+        })
+      }
+      if (table === 'user_permission_groups') {
+        return resultQuery({
+          data: [
+            {
+              id: 'grant-active', user_id: 'user-1', group_id: 'role-active', status: 'active', expires_at: null,
+              permission_groups: {
+                status: 'active',
+                permission_group_permissions: [
+                  { permissions: { key: 'service:write' } },
+                  { permissions: { key: 'service:read' } },
+                  { permissions: { key: 'service:read' } },
+                ],
+              },
+            },
+            {
+              id: 'grant-expired', user_id: 'user-1', group_id: 'role-expired', status: 'active', expires_at: '2000-01-01T00:00:00.000Z',
+              permission_groups: {
+                status: 'active',
+                permission_group_permissions: [{ permissions: { key: 'service:expired' } }],
+              },
+            },
+            {
+              id: 'grant-revoked', user_id: 'user-1', group_id: 'role-revoked', status: 'revoked', expires_at: null,
+              permission_groups: {
+                status: 'active',
+                permission_group_permissions: [{ permissions: { key: 'service:revoked' } }],
+              },
+            },
+            {
+              id: 'grant-disabled-role', user_id: 'user-1', group_id: 'role-disabled', status: 'active', expires_at: null,
+              permission_groups: {
+                status: 'disabled',
+                permission_group_permissions: [{ permissions: { key: 'service:disabled' } }],
+              },
+            },
+          ],
+          error: null,
+        })
+      }
+      return serviceQuery()
+    })
+
+    const store = createConsoleStore(env)
+    await expect(store.getEffectivePermissions('user-1')).resolves.toEqual([
+      'service:read',
+      'service:write',
+    ])
+    expect(mocks.from).not.toHaveBeenCalledWith('user_permissions')
+  })
+
   it('fails closed when profile lookup returns a database error', async () => {
     const dbError = new Error('profile lookup unavailable')
     mocks.from.mockImplementation((table: string) =>

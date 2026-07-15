@@ -187,7 +187,7 @@ function UserGroups({ session, user }: { session: Session; user: Profile }) {
     <Card className="xl:sticky xl:top-7">
       <CardHeader>
         <CardTitle className="truncate">{user.email}</CardTitle>
-        <CardDescription>Effective permissions</CardDescription>
+        <CardDescription>Effective permissions from assigned roles</CardDescription>
         <div className="flex flex-wrap gap-1 pt-1">
           {permissions.length === 0 && !loading && (
             <span className="text-xs text-muted-foreground">No permissions granted.</span>

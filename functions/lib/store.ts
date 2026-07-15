@@ -58,12 +58,6 @@ interface UserPermissionGroupRow {
   } | null
 }
 
-interface UserPermissionRow {
-  permission_key: string
-  status: 'active' | 'revoked'
-  expires_at: string | null
-}
-
 export function createConsoleStore(env: ConsoleEnv): ConsoleStore {
   const admin = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
     auth: { persistSession: false },
@@ -117,12 +111,6 @@ export function createConsoleStore(env: ConsoleEnv): ConsoleStore {
     },
 
     async getEffectivePermissions(userId) {
-      const { data: direct, error: directError } = await admin
-        .from('user_permissions')
-        .select('permission_key,status,expires_at')
-        .eq('user_id', userId)
-        .returns<UserPermissionRow[]>()
-      if (directError) throw directError
       const { data: groups, error: groupsError } = await admin
         .from('user_permission_groups')
         .select(
@@ -132,7 +120,7 @@ export function createConsoleStore(env: ConsoleEnv): ConsoleStore {
         .returns<UserPermissionGroupRow[]>()
       if (groupsError) throw groupsError
 
-      return effectivePermissions(direct ?? [], groups ?? [])
+      return effectivePermissions(groups ?? [])
     },
 
     async grantConsoleAdmin(userId) {
@@ -290,17 +278,9 @@ export function createConsoleStore(env: ConsoleEnv): ConsoleStore {
   }
 }
 
-function effectivePermissions(
-  direct: UserPermissionRow[],
-  groups: UserPermissionGroupRow[]
-): string[] {
+function effectivePermissions(groups: UserPermissionGroupRow[]): string[] {
   const now = Date.now()
   const permissions = new Set<string>()
-  for (const row of direct) {
-    if (row.status === 'active' && (!row.expires_at || Date.parse(row.expires_at) > now)) {
-      permissions.add(row.permission_key)
-    }
-  }
   for (const grant of groups) {
     if (grant.status !== 'active') continue
     if (grant.expires_at && Date.parse(grant.expires_at) <= now) continue
