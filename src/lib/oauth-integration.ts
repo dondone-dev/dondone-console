@@ -13,6 +13,7 @@ export interface OAuthIntegrationConfig {
 export interface IntegrationReadinessItem {
   label: string
   ok: boolean
+  required: boolean
   detail: string
 }
 
@@ -75,6 +76,7 @@ export function assessIntegrationReadiness(
     {
       label: 'Service active',
       ok: service.status === 'active',
+      required: true,
       detail:
         service.status === 'active'
           ? 'The OAuth client is active.'
@@ -83,6 +85,7 @@ export function assessIntegrationReadiness(
     {
       label: 'Callback URLs configured',
       ok: service.redirect_uris.length > 0,
+      required: false,
       detail:
         service.redirect_uris.length > 0
           ? service.redirect_uris.join(', ')
@@ -91,12 +94,14 @@ export function assessIntegrationReadiness(
     {
       label: 'Resource URI configured',
       ok: Boolean(service.resource_uri),
+      required: false,
       detail:
         service.resource_uri ?? 'Set a protected resource URI in the Details tab.',
     },
     {
       label: 'Approved catalog active',
       ok: Boolean(service.active_capability_version),
+      required: true,
       detail: service.active_capability_version
         ? `Active version: ${service.active_capability_version}`
         : 'Sync and approve a capability catalog.',
@@ -104,6 +109,7 @@ export function assessIntegrationReadiness(
     {
       label: 'Approved OAuth scopes loaded',
       ok: scopesLoaded,
+      required: true,
       detail:
         scopeState.scopesStatus === 'pending'
           ? 'Loading approved OAuth scopes…'
@@ -114,6 +120,7 @@ export function assessIntegrationReadiness(
     {
       label: 'At least one OAuth scope available',
       ok: scopesLoaded && scopeState.scopes.length > 0,
+      required: true,
       detail:
         scopesLoaded && scopeState.scopes.length > 0
           ? scopeState.scopes.join(', ')
