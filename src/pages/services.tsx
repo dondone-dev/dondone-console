@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Boxes, Pencil, Plus, RefreshCw, Search } from 'lucide-react'
+import { ArrowLeft, Boxes, Globe, Layers, Pencil, Plus, RefreshCw, Search, Shield } from 'lucide-react'
 import { toast } from 'sonner'
 import { apiFetch, type Service } from '@/lib/api'
 import type { Session } from '@/lib/auth'
@@ -236,14 +236,56 @@ export function ServicesPage() {
   )
 }
 
+type ServiceType = 'oauth_client' | 'resource_api' | 'hybrid'
+
+const serviceTypeConfig: Record<ServiceType, { label: string; description: string; icon: typeof Globe }> = {
+  oauth_client: {
+    label: 'OAuth Client',
+    description: 'A user-facing app that signs in via OAuth PKCE. Needs callback URLs.',
+    icon: Globe,
+  },
+  resource_api: {
+    label: 'Resource API',
+    description: 'A protected API that declares permissions, scopes, and roles. Needs a capability manifest.',
+    icon: Shield,
+  },
+  hybrid: {
+    label: 'Hybrid',
+    description: 'Both an OAuth client and a protected API. Needs callback URLs and a resource URI.',
+    icon: Layers,
+  },
+}
+
 function CreateServiceDialog({ session }: { session: Session }) {
   const queryClient = useQueryClient()
   const [open, setOpen] = useState(false)
+  const [step, setStep] = useState<'type' | 'form'>('type')
+  const [serviceType, setServiceType] = useState<ServiceType>('hybrid')
   const [key, setKey] = useState('')
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [redirectUris, setRedirectUris] = useState('')
   const [resourceUri, setResourceUri] = useState('')
+
+  const showRedirectUris = serviceType === 'oauth_client' || serviceType === 'hybrid'
+  const showResourceUri = serviceType === 'resource_api' || serviceType === 'hybrid'
+
+  const selectedType = serviceTypeConfig[serviceType]
+
+  function resetForm() {
+    setStep('type')
+    setServiceType('hybrid')
+    setKey('')
+    setName('')
+    setDescription('')
+    setRedirectUris('')
+    setResourceUri('')
+  }
+
+  function handleOpenChange(value: boolean) {
+    setOpen(value)
+    if (!value) resetForm()
+  }
 
   const create = useMutation({
     mutationFn: () =>
@@ -254,18 +296,14 @@ function CreateServiceDialog({ session }: { session: Session }) {
           key,
           name,
           description: description || null,
-          redirect_uris: splitLines(redirectUris),
-          resource_uri: resourceUri.trim() || null,
+          redirect_uris: showRedirectUris ? splitLines(redirectUris) : [],
+          resource_uri: showResourceUri ? (resourceUri.trim() || null) : null,
         }),
       }),
     onSuccess: () => {
       toast.success(`Service "${name}" created`)
       setOpen(false)
-      setKey('')
-      setName('')
-      setDescription('')
-      setRedirectUris('')
-      setResourceUri('')
+      resetForm()
       void queryClient.invalidateQueries({ queryKey: ['services'] })
     },
     onError: (error) =>
@@ -274,8 +312,10 @@ function CreateServiceDialog({ session }: { session: Session }) {
       }),
   })
 
+  const canCreate = key && name && !create.isPending
+
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>
         <Button>
           <Plus />
@@ -283,69 +323,119 @@ function CreateServiceDialog({ session }: { session: Session }) {
         </Button>
       </DialogTrigger>
       <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Create service</DialogTitle>
-          <DialogDescription>Add a top-level product or API surface.</DialogDescription>
-        </DialogHeader>
-        <div className="grid gap-4">
-          <div className="grid gap-2">
-            <Label htmlFor="service-key">Key</Label>
-            <Input
-              id="service-key"
-              placeholder="e.g. billing"
-              value={key}
-              onChange={(e) => setKey(e.target.value)}
-            />
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="service-name">Display name</Label>
-            <Input
-              id="service-name"
-              placeholder="e.g. Billing"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-            />
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="service-description">Description</Label>
-            <Input
-              id="service-description"
-              placeholder="Optional"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-            />
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="service-resource-uri">Protected resource URI</Label>
-            <Input
-              id="service-resource-uri"
-              className="font-mono"
-              placeholder="https://api.example.com"
-              value={resourceUri}
-              onChange={(e) => setResourceUri(e.target.value)}
-            />
-            <p className="text-xs text-muted-foreground">HTTPS only. Leave empty for client-only services.</p>
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="service-redirect-uris">Callback URLs</Label>
-            <Textarea
-              id="service-redirect-uris"
-              className="font-mono"
-              placeholder={'One per line, e.g.\nhttps://time.dondone.dev/auth/callback'}
-              value={redirectUris}
-              onChange={(e) => setRedirectUris(e.target.value)}
-            />
-          </div>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => setOpen(false)}>
-            Cancel
-          </Button>
-          <Button onClick={() => create.mutate()} disabled={!key || !name || create.isPending}>
-            {create.isPending && <RefreshCw className="animate-spin" />}
-            Create service
-          </Button>
-        </DialogFooter>
+        {step === 'type' ? (
+          <>
+            <DialogHeader>
+              <DialogTitle>Create service</DialogTitle>
+              <DialogDescription>Choose the type of service you want to create.</DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-3">
+              {(Object.entries(serviceTypeConfig) as [ServiceType, typeof selectedType][]).map(
+                ([value, config]) => {
+                  const Icon = config.icon
+                  return (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => {
+                        setServiceType(value)
+                        setStep('form')
+                      }}
+                      className="flex items-start gap-3 rounded-lg border p-3 text-left transition-colors hover:border-primary hover:bg-accent/50"
+                    >
+                      <div className="flex size-9 shrink-0 items-center justify-center rounded-lg border bg-muted text-muted-foreground">
+                        <Icon className="size-4" />
+                      </div>
+                      <div className="grid gap-0.5">
+                        <span className="text-sm font-medium">{config.label}</span>
+                        <span className="text-xs text-muted-foreground">{config.description}</span>
+                      </div>
+                    </button>
+                  )
+                }
+              )}
+            </div>
+          </>
+        ) : (
+          <>
+            <DialogHeader>
+              <DialogTitle>{selectedType.label} service</DialogTitle>
+              <DialogDescription>{selectedType.description}</DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-4">
+              <div className="grid gap-2">
+                <Label htmlFor="service-key">Key</Label>
+                <Input
+                  id="service-key"
+                  placeholder="e.g. billing"
+                  value={key}
+                  onChange={(e) => setKey(e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">This becomes the OAuth client_id for your service.</p>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="service-name">Display name</Label>
+                <Input
+                  id="service-name"
+                  placeholder="e.g. Billing"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="service-description">Description</Label>
+                <Input
+                  id="service-description"
+                  placeholder="Optional"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                />
+              </div>
+              {showResourceUri && (
+                <div className="grid gap-2">
+                  <Label htmlFor="service-resource-uri">Protected resource URI</Label>
+                  <Input
+                    id="service-resource-uri"
+                    className="font-mono"
+                    placeholder="https://api.example.com"
+                    value={resourceUri}
+                    onChange={(e) => setResourceUri(e.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    HTTPS only. This is where your capability manifest will be discovered.
+                  </p>
+                </div>
+              )}
+              {showRedirectUris && (
+                <div className="grid gap-2">
+                  <Label htmlFor="service-redirect-uris">Callback URLs</Label>
+                  <Textarea
+                    id="service-redirect-uris"
+                    className="font-mono"
+                    placeholder={'One per line, e.g.\nhttps://time.dondone.dev/auth/callback'}
+                    value={redirectUris}
+                    onChange={(e) => setRedirectUris(e.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground">Where users are sent after signing in. Required for OAuth login.</p>
+                </div>
+              )}
+            </div>
+            <DialogFooter>
+              <Button variant="ghost" size="sm" onClick={() => setStep('type')}>
+                <ArrowLeft />
+                Change type
+              </Button>
+              <div className="flex-1" />
+              <Button variant="outline" onClick={() => setOpen(false)}>
+                Cancel
+              </Button>
+              <Button onClick={() => create.mutate()} disabled={!canCreate}>
+                {create.isPending && <RefreshCw className="animate-spin" />}
+                Create service
+              </Button>
+            </DialogFooter>
+          </>
+        )}
       </DialogContent>
     </Dialog>
   )
