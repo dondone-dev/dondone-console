@@ -18,6 +18,7 @@ import {
   rejectionRequest,
 } from '@/lib/capability-model'
 import { cn } from '@/lib/utils'
+import { IntegrationTab } from '@/components/services/integration-tab'
 import { ServiceGroupsTab } from '@/components/services/service-groups-tab'
 import { Badge, StatusDot } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -40,6 +41,8 @@ import {
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 
+type ServiceDialogTab = 'details' | 'groups' | 'capabilities' | 'integration'
+
 export function EditServiceDialog({
   session,
   service,
@@ -51,48 +54,114 @@ export function EditServiceDialog({
   open: boolean
   onOpenChange: (open: boolean) => void
 }) {
-  const [tab, setTab] = useState<'details' | 'groups' | 'capabilities'>('details')
+  const [tab, setTab] = useState<ServiceDialogTab>('details')
+  const tabs: Array<{ id: ServiceDialogTab; label: string }> = [
+    { id: 'details', label: 'Details' },
+    { id: 'groups', label: `Groups (${service.groups.length})` },
+    { id: 'capabilities', label: 'Capabilities' },
+    { id: 'integration', label: 'Integration' },
+  ]
+
+  function tabId(value: ServiceDialogTab): string {
+    return `service-${service.key}-${value}-tab`
+  }
+
+  function panelId(value: ServiceDialogTab): string {
+    return `service-${service.key}-${value}-panel`
+  }
+
+  function handleTabKeyDown(event: React.KeyboardEvent<HTMLDivElement>): void {
+    const currentIndex = tabs.findIndex((item) => item.id === tab)
+    let nextIndex: number | null = null
+    if (event.key === 'ArrowRight') nextIndex = (currentIndex + 1) % tabs.length
+    if (event.key === 'ArrowLeft') nextIndex = (currentIndex - 1 + tabs.length) % tabs.length
+    if (event.key === 'Home') nextIndex = 0
+    if (event.key === 'End') nextIndex = tabs.length - 1
+    if (nextIndex === null) return
+
+    event.preventDefault()
+    const nextTab = tabs[nextIndex].id
+    setTab(nextTab)
+    window.requestAnimationFrame(() => document.getElementById(tabId(nextTab))?.focus())
+  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="max-h-[85svh] max-w-2xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{service.name}</DialogTitle>
           <DialogDescription>
             <span className="font-mono">{service.key}</span>
           </DialogDescription>
         </DialogHeader>
-        <div className="flex gap-1 border-b">
-          <TabButton active={tab === 'details'} onClick={() => setTab('details')}>
-            Details
-          </TabButton>
-          <TabButton active={tab === 'groups'} onClick={() => setTab('groups')}>
-            Groups ({service.groups.length})
-          </TabButton>
-          <TabButton active={tab === 'capabilities'} onClick={() => setTab('capabilities')}>
-            Capabilities
-          </TabButton>
+        <div
+          className="flex gap-1 overflow-x-auto border-b"
+          role="tablist"
+          aria-label="Service settings"
+          onKeyDown={handleTabKeyDown}
+        >
+          {tabs.map((item) => (
+            <TabButton
+              key={item.id}
+              id={tabId(item.id)}
+              panelId={panelId(item.id)}
+              active={tab === item.id}
+              onClick={() => setTab(item.id)}
+            >
+              {item.label}
+            </TabButton>
+          ))}
         </div>
-        {tab === 'details' && <DetailsTab session={session} service={service} />}
-        {tab === 'groups' && <ServiceGroupsTab session={session} service={service} />}
-        {tab === 'capabilities' && <CapabilitiesTab session={session} service={service} />}
+        <TabPanel
+          active={tab === 'details'}
+          id={panelId('details')}
+          tabId={tabId('details')}
+        >
+          <DetailsTab session={session} service={service} />
+        </TabPanel>
+        <TabPanel active={tab === 'groups'} id={panelId('groups')} tabId={tabId('groups')}>
+          <ServiceGroupsTab session={session} service={service} />
+        </TabPanel>
+        <TabPanel
+          active={tab === 'capabilities'}
+          id={panelId('capabilities')}
+          tabId={tabId('capabilities')}
+        >
+          <CapabilitiesTab session={session} service={service} />
+        </TabPanel>
+        <TabPanel
+          active={tab === 'integration'}
+          id={panelId('integration')}
+          tabId={tabId('integration')}
+        >
+          <IntegrationTab session={session} service={service} />
+        </TabPanel>
       </DialogContent>
     </Dialog>
   )
 }
 
 function TabButton({
+  id,
+  panelId,
   active,
   onClick,
   children,
 }: {
+  id: string
+  panelId: string
   active: boolean
   onClick: () => void
   children: React.ReactNode
 }) {
   return (
     <button
+      id={id}
       type="button"
+      role="tab"
+      aria-controls={panelId}
+      aria-selected={active}
+      tabIndex={active ? 0 : -1}
       className={cn(
         'border-b-2 px-3 py-2 text-sm font-medium transition-colors',
         active
@@ -103,6 +172,25 @@ function TabButton({
     >
       {children}
     </button>
+  )
+}
+
+function TabPanel({
+  active,
+  id,
+  tabId,
+  children,
+}: {
+  active: boolean
+  id: string
+  tabId: string
+  children: React.ReactNode
+}) {
+  if (!active) return null
+  return (
+    <div id={id} role="tabpanel" aria-labelledby={tabId}>
+      {children}
+    </div>
   )
 }
 
