@@ -125,6 +125,11 @@ export async function handleConsoleApi(
       )
     }
 
+    if (request.method === 'DELETE' && updateServiceMatch) {
+      await store.deleteService(updateServiceMatch[1])
+      return jsonResponse(request, { deleted: true }, { status: 200 })
+    }
+
     const capVersionsMatch = path.match(/^services\/([^/]+)\/capability-versions$/)
     if (request.method === 'GET' && capVersionsMatch) {
       return jsonResponse(

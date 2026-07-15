@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { RefreshCw, Shield } from 'lucide-react'
+import { RefreshCw, Shield, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   apiFetch,
@@ -41,7 +41,7 @@ import {
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 
-type ServiceDialogTab = 'details' | 'groups' | 'capabilities' | 'integration'
+type ServiceDialogTab = 'details' | 'groups' | 'capabilities' | 'integration' | 'settings'
 
 export function EditServiceDialog({
   session,
@@ -60,6 +60,7 @@ export function EditServiceDialog({
     { id: 'groups', label: `Groups (${service.groups.length})` },
     { id: 'capabilities', label: 'Capabilities' },
     { id: 'integration', label: 'Integration' },
+    { id: 'settings', label: 'Settings' },
   ]
 
   function tabId(value: ServiceDialogTab): string {
@@ -135,6 +136,13 @@ export function EditServiceDialog({
           tabId={tabId('integration')}
         >
           <IntegrationTab session={session} service={service} />
+        </TabPanel>
+        <TabPanel
+          active={tab === 'settings'}
+          id={panelId('settings')}
+          tabId={tabId('settings')}
+        >
+          <SettingsTab session={session} service={service} onDeleted={() => onOpenChange(false)} />
         </TabPanel>
       </DialogContent>
     </Dialog>
@@ -716,6 +724,73 @@ function DiffLine({ label, items, className }: { label: string; items: string[];
           <code className="rounded bg-muted px-1">{item}</code>
         </span>
       ))}
+    </div>
+  )
+}
+
+function SettingsTab({
+  session,
+  service,
+  onDeleted,
+}: {
+  session: Session
+  service: Service
+  onDeleted: () => void
+}) {
+  const queryClient = useQueryClient()
+  const [confirmName, setConfirmName] = useState('')
+
+  const canDelete = confirmName === service.name
+
+  const deleteService = useMutation({
+    mutationFn: () =>
+      apiFetch<{ deleted: true }>(session, `/api/services/${service.key}`, {
+        method: 'DELETE',
+      }),
+    onSuccess: () => {
+      toast.success(`Service "${service.name}" deleted`)
+      void queryClient.invalidateQueries({ queryKey: ['services'] })
+      onDeleted()
+    },
+    onError: (error) =>
+      toast.error('Failed to delete service', {
+        description: error instanceof Error ? error.message : undefined,
+      }),
+  })
+
+  return (
+    <div className="grid gap-4">
+      <p className="text-sm text-muted-foreground">
+        Deleting a service is permanent and cannot be undone. All permissions, groups, and
+        user assignments belonging to this service will also be deleted.
+      </p>
+      <div className="grid gap-3 rounded-lg border border-destructive/30 p-4">
+        <div className="flex items-center gap-2 text-sm font-medium text-destructive">
+          <Trash2 className="size-4" />
+          Danger zone
+        </div>
+        <div className="grid gap-1">
+          <Label htmlFor={`delete-confirm-${service.key}`} className="text-sm">
+            Type <span className="font-semibold">{service.name}</span> to confirm
+          </Label>
+          <Input
+            id={`delete-confirm-${service.key}`}
+            value={confirmName}
+            onChange={(e) => setConfirmName(e.target.value)}
+            placeholder={service.name}
+          />
+        </div>
+        <Button
+          variant="destructive"
+          size="sm"
+          className="justify-self-start"
+          disabled={!canDelete || deleteService.isPending}
+          onClick={() => deleteService.mutate()}
+        >
+          {deleteService.isPending && <RefreshCw className="animate-spin" />}
+          Delete this service
+        </Button>
+      </div>
     </div>
   )
 }

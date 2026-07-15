@@ -151,6 +151,7 @@ export interface ConsoleStore {
     redirect_uris: string[]
     resource_uri: string | null
   }): Promise<Service>
+  deleteService(key: string): Promise<void>
   createGroup(serviceKey: string, input: {
     key: string
     name: string

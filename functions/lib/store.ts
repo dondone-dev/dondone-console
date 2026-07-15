@@ -228,6 +228,11 @@ export function createConsoleStore(env: ConsoleEnv): ConsoleStore {
       return serviceByKey(admin, key)
     },
 
+    async deleteService(key) {
+      const { error } = await admin.from('services').delete().eq('key', key)
+      if (error) throw error
+    },
+
     async createGroup(serviceKey, input) {
       const { error } = await admin.rpc('console_create_permission_group', {
         p_service_key: serviceKey,

@@ -133,6 +133,7 @@ function store(overrides: Partial<ConsoleStore> = {}): ConsoleStore {
     }),
     createGroup: async () => services[0],
     updateGroup: async () => services[0],
+    deleteService: async () => {},
     listCapabilityVersions: async () => [],
     listActiveCapabilities: async () => [],
     ...overrides,
@@ -616,5 +617,35 @@ describe('console api', () => {
     )
     expect(response.status).toBe(400)
     expect(await response.json()).toEqual({ error: 'system_role_read_only' })
+  })
+
+  it('deletes a service for admins', async () => {
+    let deletedKey: string | undefined
+    const response = await handleConsoleApi(
+      request('/api/services/time', { method: 'DELETE', headers: auth() }),
+      env,
+      store({
+        deleteService: async (key) => {
+          deletedKey = key
+        },
+      })
+    )
+
+    expect(response.status).toBe(200)
+    expect(deletedKey).toBe('time')
+    expect(await response.json()).toEqual({ deleted: true })
+  })
+
+  it('rejects a non-admin from deleting a service', async () => {
+    const response = await handleConsoleApi(
+      request('/api/services/time', {
+        method: 'DELETE',
+        headers: { Authorization: 'Bearer user-token' },
+      }),
+      env,
+      store()
+    )
+
+    expect(response.status).toBe(403)
   })
 })
