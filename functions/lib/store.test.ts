@@ -142,6 +142,13 @@ describe('Console store capability grant RPC boundary', () => {
               },
             },
             {
+              id: 'grant-future', user_id: 'user-1', group_id: 'role-future', status: 'active', expires_at: '2999-01-01T00:00:00.000Z',
+              permission_groups: {
+                status: 'active',
+                permission_group_permissions: [{ permissions: { key: 'service:future' } }],
+              },
+            },
+            {
               id: 'grant-revoked', user_id: 'user-1', group_id: 'role-revoked', status: 'revoked', expires_at: null,
               permission_groups: {
                 status: 'active',
@@ -164,6 +171,7 @@ describe('Console store capability grant RPC boundary', () => {
 
     const store = createConsoleStore(env)
     await expect(store.getEffectivePermissions('user-1')).resolves.toEqual([
+      'service:future',
       'service:read',
       'service:write',
     ])
