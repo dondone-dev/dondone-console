@@ -13,6 +13,9 @@ import { assertValidRedirectUris, assertValidServiceKey, normalizeResourceUri, r
 
 type DbClient = SupabaseClient<any, any, any, any, any>
 
+const SERVICE_SELECT =
+  'key,name,description,status,redirect_uris,resource_uri,capability_sync_status,active_capability_version,capability_last_synced_at,capability_last_error,service_capability_versions!service_capability_versions_service_key_fkey(id),permission_groups(id,service_key,key,name,description,status,is_system,permission_group_permissions(permissions(key)))'
+
 interface PermissionGroupRow {
   id: string
   service_key: string
@@ -196,9 +199,7 @@ export function createConsoleStore(env: ConsoleEnv): ConsoleStore {
     async listServices() {
       const { data, error } = await admin
         .from('services')
-        .select(
-          'key,name,description,status,redirect_uris,resource_uri,capability_sync_status,active_capability_version,capability_last_synced_at,capability_last_error,service_capability_versions(id),permission_groups(id,service_key,key,name,description,status,is_system,permission_group_permissions(permissions(key)))'
-        )
+        .select(SERVICE_SELECT)
         .order('key')
         .returns<ServiceRow[]>()
       if (error) throw error
@@ -330,9 +331,7 @@ async function serviceByKey(
 ): Promise<Service> {
   const { data, error } = await admin
     .from('services')
-    .select(
-      'key,name,description,status,redirect_uris,resource_uri,capability_sync_status,active_capability_version,capability_last_synced_at,capability_last_error,service_capability_versions(id),permission_groups(id,service_key,key,name,description,status,is_system,permission_group_permissions(permissions(key)))'
-    )
+    .select(SERVICE_SELECT)
     .eq('key', serviceKey)
     .single<ServiceRow>()
   if (error || !data) throw error ?? new Error('service missing')

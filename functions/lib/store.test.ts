@@ -76,8 +76,16 @@ describe('Console store capability grant RPC boundary', () => {
   })
 
   it('reports pending catalog history even when no version is active', async () => {
+    const query = serviceQuery()
+    mocks.from.mockReturnValue(query)
     const store = createConsoleStore(env)
     const [service] = await store.listServices()
+
+    expect(query.select).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'service_capability_versions!service_capability_versions_service_key_fkey(id)'
+      )
+    )
     expect(service.active_capability_version).toBeNull()
     expect(service.has_capability_versions).toBe(true)
   })
