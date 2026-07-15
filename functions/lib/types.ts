@@ -48,6 +48,60 @@ export interface Service {
   status: 'active' | 'disabled'
   redirect_uris: string[]
   groups: PermissionGroup[]
+  resource_uri: string | null
+  capability_sync_status: string
+  active_capability_version: string | null
+  capability_last_synced_at: string | null
+  capability_last_error: string | null
+  has_capability_versions: boolean
+}
+
+export interface CapabilityVersion {
+  id: string
+  service_key: string
+  catalog_version: string
+  import_status: string
+  fetched_at: string
+  approved_at: string | null
+  rejection_reason: string | null
+  manifest: CapabilityManifest
+}
+
+export interface CapabilityManifest {
+  resource: string
+  authorization_servers: string[]
+  scopes_supported: string[]
+  dondone_capabilities: {
+    schema_version: 1
+    catalog_version: string
+    permissions: Array<{ key: string; description: string }>
+    roles: Array<{
+      key: string
+      name: string
+      description?: string
+      permission_keys: string[]
+    }>
+  }
+}
+
+export interface ActiveCapability {
+  service_key: string
+  key: string
+  description: string
+  oauth_scope: boolean
+  catalog_version: string
+}
+
+export interface DiffClassification {
+  change_type: 'additive' | 'benign' | 'breaking'
+  added_permissions: string[]
+  removed_permissions: string[]
+  added_scopes: string[]
+  removed_scopes: string[]
+  added_roles: string[]
+  removed_roles: string[]
+  changed_role_memberships: string[]
+  description_changes: string[]
 }
 
 export interface UserGroupGrant {
@@ -88,23 +142,29 @@ export interface ConsoleStore {
     name: string
     description: string | null
     redirect_uris: string[]
+    resource_uri: string | null
   }): Promise<Service>
   updateService(key: string, input: {
     name: string
     description: string | null
     status: 'active' | 'disabled'
     redirect_uris: string[]
+    resource_uri: string | null
   }): Promise<Service>
   createGroup(serviceKey: string, input: {
     key: string
     name: string
     description: string | null
     permission_keys: string[]
+    actor: string
   }): Promise<Service>
   updateGroup(serviceKey: string, groupKey: string, input: {
     name: string
     description: string | null
     status: 'active' | 'disabled'
     permission_keys: string[]
+    actor: string
   }): Promise<Service>
+  listCapabilityVersions(serviceKey: string): Promise<CapabilityVersion[]>
+  listActiveCapabilities(serviceKey: string): Promise<ActiveCapability[]>
 }

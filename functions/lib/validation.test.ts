@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { assertValidRedirectUris, assertValidServiceKey, requireFoundRow } from './validation'
+import {
+  assertValidRedirectUris,
+  assertValidServiceKey,
+  normalizeResourceUri,
+  requireFoundRow,
+} from './validation'
 import { ApiError } from './types'
 
 describe('assertValidServiceKey', () => {
@@ -96,6 +101,36 @@ describe('requireFoundRow', () => {
     } catch (caught) {
       expect(caught).toBeInstanceOf(ApiError)
       expect((caught as InstanceType<typeof ApiError>).status).toBe(404)
+    }
+  })
+})
+
+describe('normalizeResourceUri', () => {
+  it('normalizes an HTTPS resource URI without changing its path identity', () => {
+    expect(normalizeResourceUri('  https://api.dondone.dev/v1  ')).toBe(
+      'https://api.dondone.dev/v1'
+    )
+    expect(normalizeResourceUri('https://api.dondone.dev/')).toBe(
+      'https://api.dondone.dev/'
+    )
+    expect(normalizeResourceUri('https://api.dondone.dev')).toBe(
+      'https://api.dondone.dev'
+    )
+  })
+
+  it('accepts null and an empty field as an unconfigured resource', () => {
+    expect(normalizeResourceUri(null)).toBeNull()
+    expect(normalizeResourceUri('  ')).toBeNull()
+  })
+
+  it('rejects non-HTTPS, query, fragment, and user-info resource URIs', () => {
+    for (const value of [
+      'http://api.dondone.dev',
+      'https://api.dondone.dev?tenant=one',
+      'https://api.dondone.dev/#fragment',
+      'https://user:pass@api.dondone.dev',
+    ]) {
+      expect(() => normalizeResourceUri(value)).toThrow(ApiError)
     }
   })
 })

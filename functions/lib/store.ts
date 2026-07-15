@@ -1,6 +1,7 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import {
-  ApiError,
+  type ActiveCapability,
+  type CapabilityVersion,
   type ConsoleEnv,
   type ConsoleStore,
   type PermissionGroup,
@@ -8,7 +9,7 @@ import {
   type Service,
   type UserGroupGrant,
 } from './types'
-import { assertValidRedirectUris, assertValidServiceKey, requireFoundRow } from './validation'
+import { assertValidRedirectUris, assertValidServiceKey, normalizeResourceUri, requireFoundRow } from './validation'
 
 type DbClient = SupabaseClient<any, any, any, any, any>
 
@@ -31,6 +32,12 @@ interface ServiceRow {
   description: string | null
   status: 'active' | 'disabled'
   redirect_uris: string[]
+  resource_uri: string | null
+  capability_sync_status: string
+  active_capability_version: string | null
+  capability_last_synced_at: string | null
+  capability_last_error: string | null
+  service_capability_versions?: Array<{ id: string }>
   permission_groups?: PermissionGroupRow[]
 }
 
@@ -41,6 +48,7 @@ interface UserPermissionGroupRow {
   status: 'active' | 'revoked'
   expires_at: string | null
   permission_groups?: {
+    status: 'active' | 'disabled'
     permission_group_permissions?: Array<{
       permissions: { key: string } | null
     }>
@@ -76,11 +84,12 @@ export function createConsoleStore(env: ConsoleEnv): ConsoleStore {
     },
 
     async getProfile(userId) {
-      const { data } = await admin
+      const { data, error } = await admin
         .from('profiles')
         .select('id,email,display_name,avatar_url,status,created_at')
         .eq('id', userId)
         .maybeSingle<Profile>()
+      if (error) throw error
       return data ?? null
     },
 
@@ -105,18 +114,20 @@ export function createConsoleStore(env: ConsoleEnv): ConsoleStore {
     },
 
     async getEffectivePermissions(userId) {
-      const { data: direct } = await admin
+      const { data: direct, error: directError } = await admin
         .from('user_permissions')
         .select('permission_key,status,expires_at')
         .eq('user_id', userId)
         .returns<UserPermissionRow[]>()
-      const { data: groups } = await admin
+      if (directError) throw directError
+      const { data: groups, error: groupsError } = await admin
         .from('user_permission_groups')
         .select(
-          'id,user_id,group_id,status,expires_at,permission_groups(permission_group_permissions(permissions(key)))'
+          'id,user_id,group_id,status,expires_at,permission_groups(status,permission_group_permissions(permissions(key)))'
         )
         .eq('user_id', userId)
         .returns<UserPermissionGroupRow[]>()
+      if (groupsError) throw groupsError
 
       return effectivePermissions(direct ?? [], groups ?? [])
     },
@@ -170,19 +181,13 @@ export function createConsoleStore(env: ConsoleEnv): ConsoleStore {
     },
 
     async replaceUserGroups({ userId, grants, grantedBy }) {
-      await admin.from('user_permission_groups').delete().eq('user_id', userId)
-      if (grants.length > 0) {
-        const { error } = await admin.from('user_permission_groups').insert(
-          grants.map((grant) => ({
-            user_id: userId,
-            group_id: grant.group_id,
-            expires_at: grant.expires_at,
-            status: 'active',
-            granted_by: grantedBy,
-          }))
-        )
-        if (error) throw error
-      }
+      const { error } = await admin.rpc('console_replace_user_permission_groups', {
+        p_user_id: userId,
+        p_grants: grants,
+        p_actor: grantedBy,
+      })
+      if (error) throw error
+
       const detail = await this.getUserDetail(userId)
       if (!detail) throw new Error('user missing after update')
       return detail
@@ -192,7 +197,7 @@ export function createConsoleStore(env: ConsoleEnv): ConsoleStore {
       const { data, error } = await admin
         .from('services')
         .select(
-          'key,name,description,status,redirect_uris,permission_groups(id,service_key,key,name,description,status,is_system,permission_group_permissions(permissions(key)))'
+          'key,name,description,status,redirect_uris,resource_uri,capability_sync_status,active_capability_version,capability_last_synced_at,capability_last_error,service_capability_versions(id),permission_groups(id,service_key,key,name,description,status,is_system,permission_group_permissions(permissions(key)))'
         )
         .order('key')
         .returns<ServiceRow[]>()
@@ -203,11 +208,13 @@ export function createConsoleStore(env: ConsoleEnv): ConsoleStore {
     async createService(input) {
       assertValidServiceKey(input.key)
       assertValidRedirectUris(input.redirect_uris)
+      const resourceUri = normalizeResourceUri(input.resource_uri)
       const { error } = await admin.from('services').insert({
         key: input.key,
         name: input.name,
         description: input.description,
         redirect_uris: input.redirect_uris,
+        resource_uri: resourceUri,
       })
       if (error) throw error
       return serviceByKey(admin, input.key)
@@ -215,6 +222,7 @@ export function createConsoleStore(env: ConsoleEnv): ConsoleStore {
 
     async updateService(key, input) {
       assertValidRedirectUris(input.redirect_uris)
+      const resourceUri = normalizeResourceUri(input.resource_uri)
       const { data, error } = await admin
         .from('services')
         .update({
@@ -222,6 +230,7 @@ export function createConsoleStore(env: ConsoleEnv): ConsoleStore {
           description: input.description,
           status: input.status,
           redirect_uris: input.redirect_uris,
+          resource_uri: resourceUri,
         })
         .eq('key', key)
         .select('key')
@@ -231,38 +240,51 @@ export function createConsoleStore(env: ConsoleEnv): ConsoleStore {
     },
 
     async createGroup(serviceKey, input) {
-      await assertPermissionKeysExist(admin, input.permission_keys)
-      const { data: group, error } = await admin
-        .from('permission_groups')
-        .insert({
-          service_key: serviceKey,
-          key: input.key,
-          name: input.name,
-          description: input.description,
-        })
-        .select('id')
-        .single<{ id: string }>()
-      if (error || !group) throw error ?? new Error('group insert failed')
-      await replaceGroupPermissions(admin, group.id, input.permission_keys)
+      const { error } = await admin.rpc('console_create_permission_group', {
+        p_service_key: serviceKey,
+        p_group_key: input.key,
+        p_name: input.name,
+        p_description: input.description,
+        p_permission_keys: input.permission_keys,
+        p_actor: input.actor,
+      })
+      if (error) throw error
       return serviceByKey(admin, serviceKey)
     },
 
     async updateGroup(serviceKey, groupKey, input) {
-      await assertPermissionKeysExist(admin, input.permission_keys)
-      const { data: group, error } = await admin
-        .from('permission_groups')
-        .update({
-          name: input.name,
-          description: input.description,
-          status: input.status,
-        })
-        .eq('service_key', serviceKey)
-        .eq('key', groupKey)
-        .select('id')
-        .single<{ id: string }>()
-      if (error || !group) throw error ?? new Error('group update failed')
-      await replaceGroupPermissions(admin, group.id, input.permission_keys)
+      const { error } = await admin.rpc('console_update_permission_group', {
+        p_service_key: serviceKey,
+        p_group_key: groupKey,
+        p_name: input.name,
+        p_description: input.description,
+        p_status: input.status,
+        p_permission_keys: input.permission_keys,
+        p_actor: input.actor,
+      })
+      if (error) throw error
       return serviceByKey(admin, serviceKey)
+    },
+
+    async listCapabilityVersions(serviceKey) {
+      const { data, error } = await admin
+        .from('service_capability_versions')
+        .select('id,service_key,catalog_version,import_status,fetched_at,approved_at,rejection_reason,manifest')
+        .eq('service_key', serviceKey)
+        .order('fetched_at', { ascending: false })
+        .returns<CapabilityVersion[]>()
+      if (error) throw error
+      return data ?? []
+    },
+
+    async listActiveCapabilities(serviceKey) {
+      const { data, error } = await admin
+        .from('active_service_capabilities')
+        .select('service_key,key,description,oauth_scope,catalog_version')
+        .eq('service_key', serviceKey)
+        .returns<ActiveCapability[]>()
+      if (error) throw error
+      return data ?? []
     },
   }
 }
@@ -281,6 +303,7 @@ function effectivePermissions(
   for (const grant of groups) {
     if (grant.status !== 'active') continue
     if (grant.expires_at && Date.parse(grant.expires_at) <= now) continue
+    if (grant.permission_groups?.status !== 'active') continue
     for (const item of grant.permission_groups?.permission_group_permissions ?? []) {
       if (item.permissions?.key) permissions.add(item.permissions.key)
     }
@@ -301,45 +324,6 @@ async function listUserGroups(
   return data ?? []
 }
 
-async function assertPermissionKeysExist(
-  admin: DbClient,
-  permissionKeys: string[]
-): Promise<void> {
-  if (permissionKeys.length === 0) return
-  const requested = [...new Set(permissionKeys)]
-  const { data, error } = await admin
-    .from('permissions')
-    .select('key')
-    .in('key', requested)
-    .returns<Array<{ key: string }>>()
-  if (error) throw error
-  const found = new Set((data ?? []).map((row) => row.key))
-  const missing = requested.filter((key) => !found.has(key))
-  if (missing.length > 0) {
-    throw new ApiError(
-      400,
-      'unknown_permission_keys',
-      `Unknown permission key(s): ${missing.join(', ')}. Create them in the permissions table before attaching to a group.`
-    )
-  }
-}
-
-async function replaceGroupPermissions(
-  admin: DbClient,
-  groupId: string,
-  permissionKeys: string[]
-): Promise<void> {
-  await admin.from('permission_group_permissions').delete().eq('group_id', groupId)
-  if (permissionKeys.length === 0) return
-  const { error } = await admin.from('permission_group_permissions').insert(
-    permissionKeys.map((permissionKey) => ({
-      group_id: groupId,
-      permission_key: permissionKey,
-    }))
-  )
-  if (error) throw error
-}
-
 async function serviceByKey(
   admin: DbClient,
   serviceKey: string
@@ -347,7 +331,7 @@ async function serviceByKey(
   const { data, error } = await admin
     .from('services')
     .select(
-      'key,name,description,status,redirect_uris,permission_groups(id,service_key,key,name,description,status,is_system,permission_group_permissions(permissions(key)))'
+      'key,name,description,status,redirect_uris,resource_uri,capability_sync_status,active_capability_version,capability_last_synced_at,capability_last_error,service_capability_versions(id),permission_groups(id,service_key,key,name,description,status,is_system,permission_group_permissions(permissions(key)))'
     )
     .eq('key', serviceKey)
     .single<ServiceRow>()
@@ -363,6 +347,12 @@ function mapService(row: ServiceRow): Service {
     status: row.status,
     redirect_uris: row.redirect_uris ?? [],
     groups: (row.permission_groups ?? []).map(mapGroup),
+    resource_uri: row.resource_uri ?? null,
+    capability_sync_status: row.capability_sync_status ?? 'not_configured',
+    active_capability_version: row.active_capability_version ?? null,
+    capability_last_synced_at: row.capability_last_synced_at ?? null,
+    capability_last_error: row.capability_last_error ?? null,
+    has_capability_versions: (row.service_capability_versions?.length ?? 0) > 0,
   }
 }
 

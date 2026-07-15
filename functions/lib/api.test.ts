@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { handleConsoleApi } from './api'
 import { ApiError } from './types'
 import type {
+  CapabilityVersion,
   ConsoleEnv,
   ConsoleStore,
   Profile,
@@ -9,6 +10,18 @@ import type {
   SupabaseUser,
   UserDetail,
 } from './types'
+
+const manifest = {
+  resource: 'https://api.dondone.dev',
+  authorization_servers: ['https://auth.dondone.dev'],
+  scopes_supported: ['api:echo'],
+  dondone_capabilities: {
+    schema_version: 1 as const,
+    catalog_version: 'v2',
+    permissions: [{ key: 'api:echo', description: 'Call echo.' }],
+    roles: [{ key: 'reader', name: 'Reader', description: 'Read access.', permission_keys: ['api:echo'] }],
+  },
+}
 
 const env: ConsoleEnv = {
   SUPABASE_URL: 'https://project.supabase.co',
@@ -45,6 +58,12 @@ const services: Service[] = [
     description: null,
     status: 'active',
     redirect_uris: ['https://console.dondone.dev/auth/callback'],
+    resource_uri: null,
+    capability_sync_status: 'not_configured',
+    active_capability_version: null,
+    capability_last_synced_at: null,
+    capability_last_error: null,
+    has_capability_versions: false,
     groups: [
       {
         id: 'group-console-admin',
@@ -90,6 +109,12 @@ function store(overrides: Partial<ConsoleStore> = {}): ConsoleStore {
       description: input.description,
       status: 'active',
       redirect_uris: input.redirect_uris,
+      resource_uri: input.resource_uri,
+      capability_sync_status: 'not_configured',
+      active_capability_version: null,
+      capability_last_synced_at: null,
+      capability_last_error: null,
+      has_capability_versions: false,
       groups: [],
     }),
     updateService: async (key, input) => ({
@@ -98,10 +123,18 @@ function store(overrides: Partial<ConsoleStore> = {}): ConsoleStore {
       description: input.description,
       status: input.status,
       redirect_uris: input.redirect_uris,
+      resource_uri: input.resource_uri,
+      capability_sync_status: 'not_configured',
+      active_capability_version: null,
+      capability_last_synced_at: null,
+      capability_last_error: null,
+      has_capability_versions: false,
       groups: [],
     }),
     createGroup: async () => services[0],
     updateGroup: async () => services[0],
+    listCapabilityVersions: async () => [],
+    listActiveCapabilities: async () => [],
     ...overrides,
   }
 }
@@ -170,6 +203,19 @@ describe('console api', () => {
 
     expect(response.status).toBe(500)
     expect(await response.json()).toEqual({ error: 'internal_error' })
+  })
+
+  it.each(['/api/me', '/api/services'])('rejects a disabled profile at the shared entry gate for %s', async (path) => {
+    const response = await handleConsoleApi(
+      request(path, { headers: auth() }),
+      env,
+      store({
+        ensureProfile: async () => ({ ...adminProfile, status: 'disabled' }),
+      })
+    )
+
+    expect(response.status).toBe(403)
+    expect(await response.json()).toEqual({ error: 'user_disabled' })
   })
 
   it('rejects non-admin users from admin endpoints', async () => {
@@ -250,6 +296,23 @@ describe('console api', () => {
     })
   })
 
+  it('rejects an invalid group grant expiry before calling the store', async () => {
+    let called = false
+    const response = await handleConsoleApi(
+      request('/api/users/user-1/groups', {
+        method: 'PUT',
+        headers: { ...auth(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ grants: [{ group_id: 'group-api-basic', expires_at: 'tomorrow' }] }),
+      }),
+      env,
+      store({ replaceUserGroups: async () => { called = true; throw new Error('unexpected') } })
+    )
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toMatchObject({ error: 'invalid_expiry' })
+    expect(called).toBe(false)
+  })
+
   it('lists services for admins', async () => {
     const response = await handleConsoleApi(
       request('/api/services', { headers: auth() }),
@@ -272,6 +335,7 @@ describe('console api', () => {
           description: 'Example app using Dondone Auth.',
           status: 'active',
           redirect_uris: ['https://time.dondone.dev/auth/callback'],
+          resource_uri: 'https://time-api.dondone.dev/v1',
         }),
       }),
       env,
@@ -284,6 +348,12 @@ describe('console api', () => {
             description: input.description,
             status: input.status,
             redirect_uris: input.redirect_uris,
+            resource_uri: input.resource_uri,
+            capability_sync_status: 'not_configured',
+            active_capability_version: null,
+            capability_last_synced_at: null,
+            capability_last_error: null,
+            has_capability_versions: false,
             groups: [],
           }
         },
@@ -298,6 +368,7 @@ describe('console api', () => {
         description: 'Example app using Dondone Auth.',
         status: 'active',
         redirect_uris: ['https://time.dondone.dev/auth/callback'],
+        resource_uri: 'https://time-api.dondone.dev/v1',
       },
     })
     expect(await response.json()).toEqual({
@@ -306,8 +377,114 @@ describe('console api', () => {
       description: 'Example app using Dondone Auth.',
       status: 'active',
       redirect_uris: ['https://time.dondone.dev/auth/callback'],
+      resource_uri: 'https://time-api.dondone.dev/v1',
+      capability_sync_status: 'not_configured',
+      active_capability_version: null,
+      capability_last_synced_at: null,
+      capability_last_error: null,
+      has_capability_versions: false,
       groups: [],
     })
+  })
+
+  it('passes a normalized resource URI when creating a service', async () => {
+    let received: unknown
+    const response = await handleConsoleApi(
+      request('/api/services', {
+        method: 'POST',
+        headers: { ...auth(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          key: 'reports',
+          name: 'Reports',
+          description: null,
+          redirect_uris: [],
+          resource_uri: '  https://reports.dondone.dev  ',
+        }),
+      }),
+      env,
+      store({
+        createService: async (input) => {
+          received = input
+          return {
+            key: input.key,
+            name: input.name,
+            description: input.description,
+            status: 'active',
+            redirect_uris: input.redirect_uris,
+            resource_uri: input.resource_uri,
+            capability_sync_status: 'not_configured',
+            active_capability_version: null,
+            capability_last_synced_at: null,
+            capability_last_error: null,
+            has_capability_versions: false,
+            groups: [],
+          }
+        },
+      })
+    )
+
+    expect(response.status).toBe(201)
+    expect(received).toMatchObject({ resource_uri: 'https://reports.dondone.dev' })
+  })
+
+  it('rejects an insecure resource URI before calling the store', async () => {
+    let called = false
+    const response = await handleConsoleApi(
+      request('/api/services', {
+        method: 'POST',
+        headers: { ...auth(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          key: 'reports',
+          name: 'Reports',
+          description: null,
+          redirect_uris: [],
+          resource_uri: 'http://reports.dondone.dev',
+        }),
+      }),
+      env,
+      store({ createService: async () => { called = true; throw new Error('unexpected') } })
+    )
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toMatchObject({ error: 'invalid_resource_uri' })
+    expect(called).toBe(false)
+  })
+
+  it('returns a specific conflict when a resource URI is already registered', async () => {
+    const response = await handleConsoleApi(
+      request('/api/services/reports', {
+        method: 'PUT',
+        headers: { ...auth(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'Reports', description: null, status: 'active', redirect_uris: [],
+          resource_uri: 'https://api.dondone.dev',
+        }),
+      }),
+      env,
+      store({ updateService: async () => { throw {
+        code: '23505', message: 'duplicate key value violates unique constraint "services_resource_uri_unique"',
+        constraint: 'services_resource_uri_unique',
+      } } })
+    )
+    expect(response.status).toBe(409)
+    expect(await response.json()).toMatchObject({ error: 'resource_uri_already_exists' })
+  })
+
+  it('returns resource_uri_locked when an active catalog prevents identity changes', async () => {
+    const response = await handleConsoleApi(
+      request('/api/services/api', {
+        method: 'PUT',
+        headers: { ...auth(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'API', description: null, status: 'active', redirect_uris: [],
+          resource_uri: 'https://new-api.dondone.dev',
+        }),
+      }),
+      env,
+      store({ updateService: async () => { throw { code: '23514', message: 'resource_uri_locked' } } })
+    )
+    expect(response.status).toBe(409)
+    expect(await response.json()).toMatchObject({ error: 'resource_uri_locked' })
   })
 
   it('rejects a malformed redirect_uris field instead of silently clearing it', async () => {
@@ -382,5 +559,62 @@ describe('console api', () => {
       error: 'invalid_reference',
       message: 'Key (permission_key)=(tier:lowb_vip) is not present in table "permissions".',
     })
+  })
+
+  it('forwards the authenticated actor when creating a catalog-backed group', async () => {
+    let received: unknown
+    const response = await handleConsoleApi(
+      request('/api/services/api/groups', {
+        method: 'POST',
+        headers: { ...auth(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: 'reader', name: 'Reader', description: null, permission_keys: ['api:echo'] }),
+      }),
+      env,
+      store({ createGroup: async (_serviceKey, input) => { received = input; return services[0] } })
+    )
+    expect(response.status).toBe(201)
+    expect(received).toMatchObject({ actor: admin.id, permission_keys: ['api:echo'] })
+  })
+
+  it('rejects malformed permission selections instead of silently clearing a group', async () => {
+    let called = false
+    const response = await handleConsoleApi(
+      request('/api/services/api/groups/reader', {
+        method: 'PUT', headers: { ...auth(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'Reader', description: null, status: 'active', permission_keys: 'api:echo' }),
+      }),
+      env,
+      store({ updateGroup: async () => { called = true; throw new Error('unexpected') } })
+    )
+    expect(response.status).toBe(400)
+    expect(await response.json()).toMatchObject({ error: 'invalid_field' })
+    expect(called).toBe(false)
+  })
+
+  it('returns raw pending manifests for permission and built-in-role review', async () => {
+    const version: CapabilityVersion = {
+      id: 'version-2', service_key: 'api', catalog_version: 'v2', import_status: 'pending_review',
+      fetched_at: '2026-07-14T00:00:00Z', approved_at: null, rejection_reason: null, manifest,
+    }
+    const response = await handleConsoleApi(
+      request('/api/services/api/capability-versions', { headers: auth() }),
+      env,
+      store({ listCapabilityVersions: async () => [version] })
+    )
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ versions: [version] })
+  })
+
+  it('preserves a system-role read-only error from the store', async () => {
+    const response = await handleConsoleApi(
+      request('/api/services/api/groups/reader', {
+        method: 'PUT', headers: { ...auth(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'Changed', description: null, status: 'disabled', permission_keys: [] }),
+      }),
+      env,
+      store({ updateGroup: async () => { throw new ApiError(400, 'system_role_read_only') } })
+    )
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({ error: 'system_role_read_only' })
   })
 })

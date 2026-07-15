@@ -56,7 +56,7 @@ export function ServicesPage() {
     queryKey: ['services'],
     queryFn: () => apiFetch<{ services: Service[] }>(session, '/api/services'),
   })
-  const list = services.data?.services ?? []
+  const list = useMemo(() => services.data?.services ?? [], [services.data?.services])
   const filtered = useMemo(() => filterServices(list, search, statusFilter), [list, search, statusFilter])
   const {
     items: pageItems,
@@ -243,6 +243,7 @@ function CreateServiceDialog({ session }: { session: Session }) {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [redirectUris, setRedirectUris] = useState('')
+  const [resourceUri, setResourceUri] = useState('')
 
   const create = useMutation({
     mutationFn: () =>
@@ -254,6 +255,7 @@ function CreateServiceDialog({ session }: { session: Session }) {
           name,
           description: description || null,
           redirect_uris: splitLines(redirectUris),
+          resource_uri: resourceUri.trim() || null,
         }),
       }),
     onSuccess: () => {
@@ -263,6 +265,7 @@ function CreateServiceDialog({ session }: { session: Session }) {
       setName('')
       setDescription('')
       setRedirectUris('')
+      setResourceUri('')
       void queryClient.invalidateQueries({ queryKey: ['services'] })
     },
     onError: (error) =>
@@ -311,6 +314,17 @@ function CreateServiceDialog({ session }: { session: Session }) {
               value={description}
               onChange={(e) => setDescription(e.target.value)}
             />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="service-resource-uri">Protected resource URI</Label>
+            <Input
+              id="service-resource-uri"
+              className="font-mono"
+              placeholder="https://api.example.com"
+              value={resourceUri}
+              onChange={(e) => setResourceUri(e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">HTTPS only. Leave empty for client-only services.</p>
           </div>
           <div className="grid gap-2">
             <Label htmlFor="service-redirect-uris">Callback URLs</Label>

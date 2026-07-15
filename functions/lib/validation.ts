@@ -50,6 +50,31 @@ export function assertValidRedirectUris(redirectUris: string[]): void {
   }
 }
 
+export function normalizeResourceUri(value: string | null): string | null {
+  const trimmed = value?.trim() ?? ''
+  if (!trimmed) return null
+  let parsed: URL
+  try {
+    parsed = new URL(trimmed)
+  } catch {
+    throw new ApiError(400, 'invalid_resource_uri', 'Resource URI must be an absolute HTTPS URL.')
+  }
+  if (
+    parsed.protocol !== 'https:' ||
+    parsed.username ||
+    parsed.password ||
+    parsed.search ||
+    parsed.hash
+  ) {
+    throw new ApiError(
+      400,
+      'invalid_resource_uri',
+      'Resource URI must use HTTPS and must not contain user info, a query, or a fragment.'
+    )
+  }
+  return trimmed
+}
+
 export function requireFoundRow<T>(data: T | null, error: unknown): T {
   if (error) throw error
   if (!data) throw new ApiError(404, 'not_found')

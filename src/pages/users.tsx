@@ -145,12 +145,17 @@ function UserGroups({ session, user }: { session: Session; user: Profile }) {
     queryKey: ['services'],
     queryFn: () => apiFetch<{ services: Service[] }>(session, '/api/services'),
   })
-  const activeGroupIds = useMemo(
-    () => new Set((detail.data?.groups ?? []).filter((g) => g.status === 'active').map((g) => g.group_id)),
-    [detail.data]
+  const groupGrants = detail.data?.groups
+  const activeGrants = useMemo(
+    () => new Map(
+      (groupGrants ?? [])
+        .filter((grant) => grant.status === 'active')
+        .map((grant) => [grant.group_id, grant.expires_at] as const)
+    ),
+    [groupGrants]
   )
-  const [draft, setDraft] = useState<Set<string> | null>(null)
-  const selectedGroups = draft ?? activeGroupIds
+  const [draft, setDraft] = useState<Map<string, string | null> | null>(null)
+  const selectedGroups = draft ?? activeGrants
 
   const save = useMutation({
     mutationFn: () =>
@@ -158,7 +163,10 @@ function UserGroups({ session, user }: { session: Session; user: Profile }) {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          grants: [...selectedGroups].map((groupId) => ({ group_id: groupId, expires_at: null })),
+          grants: [...selectedGroups].map(([groupId, expiresAt]) => ({
+            group_id: groupId,
+            expires_at: expiresAt,
+          })),
         }),
       }),
     onSuccess: () => {
@@ -207,30 +215,42 @@ function UserGroups({ session, user }: { session: Session; user: Profile }) {
             {service.groups.map((group) => {
               const checked = selectedGroups.has(group.id)
               return (
-                <label
+                <div
                   key={group.id}
                   className={cn(
                     'flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors hover:bg-muted/50',
                     checked && 'border-primary/40 bg-primary/5 dark:bg-primary/10'
                   )}
                 >
-                  <Checkbox
-                    className="mt-0.5"
-                    checked={checked}
+                  <Checkbox className="mt-0.5" checked={checked} disabled={group.status !== 'active' && !checked}
                     onCheckedChange={() => {
-                      const next = new Set(selectedGroups)
+                      const next = new Map(selectedGroups)
                       if (checked) next.delete(group.id)
-                      else next.add(group.id)
+                      else next.set(group.id, null)
                       setDraft(next)
-                    }}
-                  />
+                    }} />
                   <span className="grid gap-0.5 text-sm leading-tight">
                     <span className="font-medium">{group.name}</span>
                     <span className="font-mono text-xs text-muted-foreground">
                       {group.permissions.join(', ') || 'no permissions'}
                     </span>
+                    {checked && (
+                      <span className="mt-1 grid gap-1">
+                        <span className="text-[11px] text-muted-foreground">Expires at (optional)</span>
+                        <Input
+                          type="datetime-local"
+                          className="h-8 text-xs"
+                          value={toDateTimeLocal(selectedGroups.get(group.id) ?? null)}
+                          onChange={(event) => {
+                            const next = new Map(selectedGroups)
+                            next.set(group.id, event.target.value ? new Date(event.target.value).toISOString() : null)
+                            setDraft(next)
+                          }}
+                        />
+                      </span>
+                    )}
                   </span>
-                </label>
+                </div>
               )
             })}
           </div>
@@ -244,4 +264,11 @@ function UserGroups({ session, user }: { session: Session; user: Profile }) {
       </CardFooter>
     </Card>
   )
+}
+
+function toDateTimeLocal(value: string | null): string {
+  if (!value) return ''
+  const date = new Date(value)
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000)
+  return local.toISOString().slice(0, 16)
 }

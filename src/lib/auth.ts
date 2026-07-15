@@ -1,5 +1,46 @@
-const AUTH_BASE = import.meta.env.VITE_AUTH_BASE as string
-const CLIENT_ID = import.meta.env.VITE_AUTH_CLIENT_ID as string
+const DEFAULT_AUTH_BASE = 'https://auth.dondone.dev'
+const DEFAULT_AUTH_CLIENT_ID = 'console'
+const DEFAULT_AUTH_RESOURCE = 'https://api.dondone.dev'
+const DEFAULT_AUTH_SCOPE = 'api:echo'
+
+export interface OAuthTransaction {
+  state: string
+  verifier: string
+  resource: string
+  scopes: string[]
+}
+
+export interface OAuthClientConfig {
+  authBase: string
+  clientId: string
+  resource: string
+  scopes: string[]
+}
+
+export function normalizeScopes(scope: string): string[] {
+  return [...new Set(scope.split(/\s+/).filter(Boolean))]
+}
+
+const AUTH_BASE =
+  (import.meta.env.VITE_AUTH_BASE as string | undefined)?.trim() ||
+  DEFAULT_AUTH_BASE
+const CLIENT_ID =
+  (import.meta.env.VITE_AUTH_CLIENT_ID as string | undefined)?.trim() ||
+  DEFAULT_AUTH_CLIENT_ID
+const AUTH_RESOURCE =
+  (import.meta.env.VITE_AUTH_RESOURCE as string | undefined)?.trim() ||
+  DEFAULT_AUTH_RESOURCE
+const configuredScopes = normalizeScopes(
+  (import.meta.env.VITE_AUTH_SCOPE as string | undefined) ?? DEFAULT_AUTH_SCOPE
+)
+const AUTH_SCOPES =
+  configuredScopes.length > 0 ? configuredScopes : [DEFAULT_AUTH_SCOPE]
+const OAUTH_CLIENT_CONFIG: OAuthClientConfig = {
+  authBase: AUTH_BASE,
+  clientId: CLIENT_ID,
+  resource: AUTH_RESOURCE,
+  scopes: AUTH_SCOPES,
+}
 
 export interface Session {
   accessToken: string
@@ -8,6 +49,7 @@ export interface Session {
 }
 
 const SESSION_KEY = 'dondone_console_session'
+const OAUTH_TRANSACTION_KEY = 'dondone_console_oauth_transaction'
 
 function base64url(input: ArrayBuffer | Uint8Array): string {
   const bytes = input instanceof Uint8Array ? input : new Uint8Array(input)
@@ -25,46 +67,118 @@ function randomValue(size: number): string {
   return base64url(crypto.getRandomValues(new Uint8Array(size)))
 }
 
-export async function startLogin(): Promise<void> {
-  const state = randomValue(16)
-  const verifier = randomValue(32)
-  const challenge = await deriveChallenge(verifier)
-  sessionStorage.setItem('pkce_state', state)
-  sessionStorage.setItem('pkce_verifier', verifier)
+export function buildAuthorizationUrl(params: {
+  authBase: string
+  clientId: string
+  redirectUri: string
+  challenge: string
+  transaction: OAuthTransaction
+}): URL {
+  const url = new URL(`${params.authBase}/`)
+  url.searchParams.set('client_id', params.clientId)
+  url.searchParams.set('redirect_uri', params.redirectUri)
+  url.searchParams.set('state', params.transaction.state)
+  url.searchParams.set('code_challenge', params.challenge)
+  url.searchParams.set('code_challenge_method', 'S256')
+  url.searchParams.set('resource', params.transaction.resource)
+  url.searchParams.set('scope', params.transaction.scopes.join(' '))
+  return url
+}
+
+export function buildTokenExchangeBody(params: {
+  clientId: string
+  redirectUri: string
+  code: string
+  transaction: OAuthTransaction
+}) {
+  return {
+    client_id: params.clientId,
+    redirect_uri: params.redirectUri,
+    code: params.code,
+    code_verifier: params.transaction.verifier,
+    resource: params.transaction.resource,
+    scope: params.transaction.scopes.join(' '),
+  }
+}
+
+function readOAuthTransaction(): OAuthTransaction | null {
+  try {
+    const raw = sessionStorage.getItem(OAUTH_TRANSACTION_KEY)
+    if (!raw) return null
+    const value = JSON.parse(raw) as Partial<OAuthTransaction>
+    if (
+      typeof value.state !== 'string' ||
+      typeof value.verifier !== 'string' ||
+      typeof value.resource !== 'string' ||
+      !Array.isArray(value.scopes) ||
+      !value.scopes.every((scope) => typeof scope === 'string')
+    ) {
+      return null
+    }
+    return {
+      state: value.state,
+      verifier: value.verifier,
+      resource: value.resource,
+      scopes: normalizeScopes(value.scopes.join(' ')),
+    }
+  } catch {
+    return null
+  }
+}
+
+export async function startLogin(
+  config: OAuthClientConfig = OAUTH_CLIENT_CONFIG
+): Promise<void> {
+  const transaction: OAuthTransaction = {
+    state: randomValue(16),
+    verifier: randomValue(32),
+    resource: config.resource,
+    scopes: config.scopes,
+  }
+  const challenge = await deriveChallenge(transaction.verifier)
+  sessionStorage.setItem(OAUTH_TRANSACTION_KEY, JSON.stringify(transaction))
 
   const redirectUri = `${window.location.origin}/auth/callback`
-  const url = new URL(`${AUTH_BASE}/`)
-  url.searchParams.set('client_id', CLIENT_ID)
-  url.searchParams.set('redirect_uri', redirectUri)
-  url.searchParams.set('state', state)
-  url.searchParams.set('code_challenge', challenge)
-  url.searchParams.set('code_challenge_method', 'S256')
+  const url = buildAuthorizationUrl({
+    authBase: config.authBase,
+    clientId: config.clientId,
+    redirectUri,
+    challenge,
+    transaction,
+  })
   window.location.href = url.toString()
 }
 
-export async function handleCallback(): Promise<Session> {
+export async function handleCallback(
+  config: OAuthClientConfig = OAUTH_CLIENT_CONFIG
+): Promise<Session> {
   const params = new URLSearchParams(window.location.search)
   const code = params.get('code')
   const returnedState = params.get('state')
-  const state = sessionStorage.getItem('pkce_state')
-  const verifier = sessionStorage.getItem('pkce_verifier')
-  sessionStorage.removeItem('pkce_state')
-  sessionStorage.removeItem('pkce_verifier')
+  const transaction = readOAuthTransaction()
+  sessionStorage.removeItem(OAUTH_TRANSACTION_KEY)
 
-  if (!code || !returnedState || returnedState !== state || !verifier) {
+  if (
+    !code ||
+    !returnedState ||
+    !transaction ||
+    returnedState !== transaction.state
+  ) {
     throw new Error('Invalid authorization response.')
   }
 
   const redirectUri = `${window.location.origin}/auth/callback`
-  const response = await fetch(`${AUTH_BASE}/api/token`, {
+  const response = await fetch(`${config.authBase}/api/token`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      client_id: CLIENT_ID,
-      redirect_uri: redirectUri,
-      code,
-      code_verifier: verifier,
-    }),
+    body: JSON.stringify(
+      buildTokenExchangeBody({
+        clientId: config.clientId,
+        redirectUri,
+        code,
+        transaction,
+      })
+    ),
   })
   const body = (await response.json()) as {
     access_token?: string

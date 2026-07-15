@@ -15,6 +15,8 @@ Console uses Dondone Auth with the same PKCE flow as other apps:
 ```sh
 VITE_AUTH_BASE=https://auth.dondone.dev
 VITE_AUTH_CLIENT_ID=console
+VITE_AUTH_RESOURCE=https://api.dondone.dev
+VITE_AUTH_SCOPE=api:echo
 ```
 
 Register the client in `dondone-auth`:
@@ -30,14 +32,28 @@ Register the client in `dondone-auth`:
 
 ## Environment
 
-These non-sensitive defaults are already tracked in `wrangler.toml`, so you usually do not need to add them manually in the Cloudflare dashboard:
+These non-sensitive defaults are tracked in `wrangler.toml` for the Pages
+runtime and mirrored by the frontend build defaults:
 
 ```sh
 SUPABASE_URL=https://ttmrvhkmqljulrptviow.supabase.co
 SUPABASE_PUBLISHABLE_KEY=<supabase-publishable-key>
 VITE_AUTH_BASE=https://auth.dondone.dev
 VITE_AUTH_CLIENT_ID=console
+VITE_AUTH_RESOURCE=https://api.dondone.dev
+VITE_AUTH_SCOPE=api:echo
 ```
+
+`VITE_AUTH_RESOURCE` and `VITE_AUTH_SCOPE` select the protected resource and
+capabilities bound to the authorization code. Scope values are separated by
+whitespace; blank entries and duplicates are removed. If either variable is
+unset or blank, the client uses the API-compatible defaults shown above.
+
+Cloudflare does not inject `wrangler.toml` runtime variables into the Vite
+build. Set the `VITE_*` values as Pages build environment variables to override
+them. The client also contains the non-sensitive defaults shown above, so a
+production build without build-time overrides never emits an `undefined` Auth
+URL.
 
 Set this bootstrap allowlist as a Pages secret because `wrangler.toml` is the source of truth for Pages configuration:
 

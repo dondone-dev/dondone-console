@@ -10,6 +10,12 @@ function makeService(overrides: Partial<Service> = {}): Service {
     status: 'active',
     redirect_uris: [],
     groups: [],
+    resource_uri: null,
+    capability_sync_status: 'unknown',
+    active_capability_version: null,
+    capability_last_synced_at: null,
+    capability_last_error: null,
+    has_capability_versions: false,
     ...overrides,
   }
 }

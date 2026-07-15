@@ -15,6 +15,8 @@ Console 通过 Dondone Auth 登录，使用和其他应用一致的 PKCE 流程�
 ```sh
 VITE_AUTH_BASE=https://auth.dondone.dev
 VITE_AUTH_CLIENT_ID=console
+VITE_AUTH_RESOURCE=https://api.dondone.dev
+VITE_AUTH_SCOPE=api:echo
 ```
 
 需要在 `dondone-auth` 注册 client：
@@ -30,14 +32,24 @@ VITE_AUTH_CLIENT_ID=console
 
 ## 环境变量
 
-这些非敏感默认值已经写在 `wrangler.toml` 中，通常不需要在 Cloudflare Dashboard 里手动重复添加：
+这些非敏感默认值写在 `wrangler.toml` 中供 Pages 运行时使用，并同步作为前端构建默认值：
 
 ```sh
 SUPABASE_URL=https://ttmrvhkmqljulrptviow.supabase.co
 SUPABASE_PUBLISHABLE_KEY=<supabase-publishable-key>
 VITE_AUTH_BASE=https://auth.dondone.dev
 VITE_AUTH_CLIENT_ID=console
+VITE_AUTH_RESOURCE=https://api.dondone.dev
+VITE_AUTH_SCOPE=api:echo
 ```
+
+`VITE_AUTH_RESOURCE` 与 `VITE_AUTH_SCOPE` 指定绑定到授权码的受保护资源和能力。
+scope 以空白字符分隔，客户端会移除空项和重复项；变量缺失或为空时，使用上面所示的
+API 兼容默认值。
+
+Cloudflare 不会把 `wrangler.toml` 的运行时变量自动注入 Vite 构建。需要覆盖这些默认值
+时，应在 Pages 的构建环境变量中设置 `VITE_*`。客户端代码也内置了上面列出的非敏感
+默认值，因此生产构建即使没有构建期覆盖，也不会生成包含 `undefined` 的 Auth URL。
 
 因为 `wrangler.toml` 会作为 Pages 配置源，bootstrap 邮箱白名单建议用 Pages secret 设置：
 

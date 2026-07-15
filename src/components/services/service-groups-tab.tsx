@@ -1,11 +1,13 @@
 import { useState } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Plus, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
-import { apiFetch, type Service } from '@/lib/api'
+import { apiFetch, type ActiveCapability, type Service } from '@/lib/api'
+import { capabilitySelectionState } from '@/lib/capability-model'
 import type { Session } from '@/lib/auth'
 import { Badge, StatusDot } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
@@ -37,7 +39,11 @@ export function ServiceGroupsTab({ session, service }: { session: Session; servi
             onDone={() => setEditingGroupId(null)}
           />
         ) : (
-          <GroupSummaryRow key={group.id} group={group} onEdit={() => setEditingGroupId(group.id)} />
+          <GroupSummaryRow
+            key={group.id}
+            group={group}
+            onEdit={group.is_system ? undefined : () => setEditingGroupId(group.id)}
+          />
         )
       )}
       {adding ? (
@@ -57,7 +63,7 @@ export function ServiceGroupsTab({ session, service }: { session: Session; servi
   )
 }
 
-function GroupSummaryRow({ group, onEdit }: { group: Group; onEdit: () => void }) {
+function GroupSummaryRow({ group, onEdit }: { group: Group; onEdit?: () => void }) {
   return (
     <div className="flex items-center justify-between gap-3 rounded-lg border p-3">
       <div className="grid gap-0.5 text-sm leading-tight">
@@ -67,14 +73,13 @@ function GroupSummaryRow({ group, onEdit }: { group: Group; onEdit: () => void }
           <Badge variant="outline" className="font-mono font-normal text-muted-foreground">
             {group.key}
           </Badge>
+          {group.is_system && <Badge variant="secondary">Service manifest</Badge>}
         </span>
         <span className="font-mono text-xs text-muted-foreground">
           {group.permissions.join(', ') || 'no permissions'}
         </span>
       </div>
-      <Button size="sm" variant="ghost" onClick={onEdit}>
-        Edit
-      </Button>
+      {onEdit && <Button size="sm" variant="ghost" onClick={onEdit}>Edit</Button>}
     </div>
   )
 }
@@ -95,11 +100,43 @@ function GroupForm({
   const [name, setName] = useState(group?.name ?? '')
   const [description, setDescription] = useState(group?.description ?? '')
   const [status, setStatus] = useState<'active' | 'disabled'>(group?.status ?? 'active')
-  const [permissions, setPermissions] = useState(group?.permissions.join(', ') ?? '')
+  const [selectedPermissions, setSelectedPermissions] = useState<Set<string>>(
+    new Set(group?.permissions ?? [])
+  )
+
+  const activeCaps = useQuery({
+    queryKey: ['active-capabilities', service.key],
+    queryFn: () =>
+      apiFetch<{ capabilities: ActiveCapability[] }>(
+        session,
+        `/api/services/${service.key}/capabilities`
+      ),
+  })
+
+  const capList = activeCaps.data?.capabilities ?? []
+  const queryStatus = activeCaps.isLoading ? 'loading' : activeCaps.isError ? 'error' : 'success'
+  const selection = capabilitySelectionState(
+    queryStatus,
+    capList.map((cap) => cap.key),
+    [...selectedPermissions]
+  )
+
+  function togglePermission(permKey: string) {
+    setSelectedPermissions((prev) => {
+      const next = new Set(prev)
+      if (next.has(permKey)) {
+        next.delete(permKey)
+      } else {
+        next.add(permKey)
+      }
+      return next
+    })
+  }
 
   const save = useMutation({
-    mutationFn: () =>
-      group
+    mutationFn: () => {
+      const permKeys = [...selectedPermissions]
+      return group
         ? apiFetch<Service>(session, `/api/services/${service.key}/groups/${group.key}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
@@ -107,7 +144,7 @@ function GroupForm({
               name,
               description: description || null,
               status,
-              permission_keys: splitPermissionKeys(permissions),
+              permission_keys: permKeys,
             }),
           })
         : apiFetch<Service>(session, `/api/services/${service.key}/groups`, {
@@ -117,9 +154,10 @@ function GroupForm({
               key,
               name,
               description: description || null,
-              permission_keys: splitPermissionKeys(permissions),
+              permission_keys: permKeys,
             }),
-          }),
+          })
+    },
     onSuccess: () => {
       toast.success(`Group "${name}" ${group ? 'saved' : 'created'}`)
       void queryClient.invalidateQueries({ queryKey: ['services'] })
@@ -183,33 +221,57 @@ function GroupForm({
         />
       </div>
       <div className="grid gap-1.5">
-        <Label htmlFor={`group-permissions-${group?.id ?? 'new'}`} className="text-xs text-muted-foreground">
-          Permissions
-        </Label>
-        <Input
-          id={`group-permissions-${group?.id ?? 'new'}`}
-          className="font-mono"
-          placeholder="Comma separated"
-          value={permissions}
-          onChange={(e) => setPermissions(e.target.value)}
-        />
+        <Label className="text-xs text-muted-foreground">Permissions</Label>
+        {selection.kind === 'loading' && <p className="text-xs text-muted-foreground">Loading active catalog…</p>}
+        {selection.kind === 'error' && (
+          <div className="flex items-center gap-2 text-xs text-destructive">
+            Failed to load the active catalog.
+            <Button size="sm" variant="outline" onClick={() => void activeCaps.refetch()}>Retry</Button>
+          </div>
+        )}
+        {selection.kind === 'ready' && (
+          <div className="grid gap-1.5 rounded border p-2">
+            {capList.map((cap) => (
+              <label
+                key={cap.key}
+                className="flex cursor-pointer items-center gap-2 rounded p-1 text-sm hover:bg-muted/50"
+              >
+                <Checkbox
+                  checked={selectedPermissions.has(cap.key)}
+                  onCheckedChange={() => togglePermission(cap.key)}
+                />
+                <span className="font-mono text-xs">{cap.key}</span>
+                <span className="flex-1 truncate text-xs text-muted-foreground">{cap.description}</span>
+              </label>
+            ))}
+          </div>
+        )}
+        {selection.kind === 'empty' && (
+          <p className="text-xs text-muted-foreground">
+            The loaded active capability catalog is empty. Sync and approve a catalog first.
+          </p>
+        )}
+        {selection.unavailable.length > 0 && (
+          <div className="grid gap-1 rounded border border-destructive/30 p-2 text-xs text-destructive">
+            <span>These permissions are no longer in the active catalog. Remove them before saving:</span>
+            {selection.unavailable.map((key) => (
+              <label key={key} className="flex items-center gap-2">
+                <Checkbox checked onCheckedChange={() => togglePermission(key)} />
+                <span className="font-mono">{key}</span>
+              </label>
+            ))}
+          </div>
+        )}
       </div>
       <div className="flex justify-end gap-2">
         <Button variant="outline" size="sm" onClick={onDone}>
           Cancel
         </Button>
-        <Button size="sm" onClick={() => save.mutate()} disabled={!name || (!group && !key) || save.isPending}>
+        <Button size="sm" onClick={() => save.mutate()} disabled={!name || (!group && !key) || !selection.canSave || save.isPending}>
           {save.isPending && <RefreshCw className="animate-spin" />}
           {group ? 'Save' : 'Create group'}
         </Button>
       </div>
     </div>
   )
-}
-
-function splitPermissionKeys(value: string): string[] {
-  return value
-    .split(',')
-    .map((item) => item.trim())
-    .filter(Boolean)
 }

@@ -1,5 +1,6 @@
 import { createConsoleStore } from './store'
 import { ApiError, type ConsoleEnv, type ConsoleStore, type SupabaseUser } from './types'
+import { normalizeResourceUri } from './validation'
 
 export async function handleConsoleApi(
   request: Request,
@@ -12,7 +13,7 @@ export async function handleConsoleApi(
     const url = new URL(request.url)
     const path = url.pathname.replace(/^\/api\/?/, '')
     const auth = await requireUser(request, store)
-    await store.ensureProfile(auth.user)
+    requireActiveProfile(await store.ensureProfile(auth.user))
 
     if (request.method === 'GET' && path === 'me') {
       return jsonResponse(request, await mePayload(store, auth.user))
@@ -72,6 +73,7 @@ export async function handleConsoleApi(
           name: stringField(body, 'name'),
           description: optionalStringField(body, 'description'),
           redirect_uris: requireStringArray(body, 'redirect_uris'),
+          resource_uri: normalizeResourceUri(optionalStringField(body, 'resource_uri')),
         }),
         { status: 201 }
       )
@@ -86,7 +88,8 @@ export async function handleConsoleApi(
           key: stringField(body, 'key'),
           name: stringField(body, 'name'),
           description: optionalStringField(body, 'description'),
-          permission_keys: stringArrayField(body, 'permission_keys'),
+          permission_keys: requireStringArray(body, 'permission_keys'),
+          actor: auth.user.id,
         }),
         { status: 201 }
       )
@@ -101,7 +104,8 @@ export async function handleConsoleApi(
           name: stringField(body, 'name'),
           description: optionalStringField(body, 'description'),
           status: enumField(body, 'status', ['active', 'disabled']),
-          permission_keys: stringArrayField(body, 'permission_keys'),
+          permission_keys: requireStringArray(body, 'permission_keys'),
+          actor: auth.user.id,
         })
       )
     }
@@ -116,7 +120,24 @@ export async function handleConsoleApi(
           description: optionalStringField(body, 'description'),
           status: enumField(body, 'status', ['active', 'disabled']),
           redirect_uris: requireStringArray(body, 'redirect_uris'),
+          resource_uri: normalizeResourceUri(optionalStringField(body, 'resource_uri')),
         })
+      )
+    }
+
+    const capVersionsMatch = path.match(/^services\/([^/]+)\/capability-versions$/)
+    if (request.method === 'GET' && capVersionsMatch) {
+      return jsonResponse(
+        request,
+        { versions: await store.listCapabilityVersions(capVersionsMatch[1]) }
+      )
+    }
+
+    const activeCapMatch = path.match(/^services\/([^/]+)\/capabilities$/)
+    if (request.method === 'GET' && activeCapMatch) {
+      return jsonResponse(
+        request,
+        { capabilities: await store.listActiveCapabilities(activeCapMatch[1]) }
       )
     }
 
@@ -132,8 +153,14 @@ export async function handleConsoleApi(
   }
 }
 
+function requireActiveProfile(profile: { status: 'active' | 'disabled' }): void {
+  if (profile.status !== 'active') {
+    throw new ApiError(403, 'user_disabled')
+  }
+}
+
 function mapDbError(error: unknown): ApiError | null {
-  const pgError = error as { code?: string; message?: string; details?: string } | null
+  const pgError = error as { code?: string; message?: string; details?: string; constraint?: string } | null
   if (!pgError || typeof pgError.code !== 'string') return null
   if (pgError.code === '23503') {
     return new ApiError(
@@ -143,11 +170,28 @@ function mapDbError(error: unknown): ApiError | null {
     )
   }
   if (pgError.code === '23505') {
+    if (
+      pgError.constraint === 'services_resource_uri_unique' ||
+      pgError.message?.includes('services_resource_uri_unique')
+    ) {
+      return new ApiError(409, 'resource_uri_already_exists', 'This resource URI is already registered.')
+    }
     return new ApiError(
       409,
       'already_exists',
       pgError.details ?? pgError.message ?? 'A record with this key already exists.'
     )
+  }
+  if (pgError.code === '23514' || pgError.code === '22023') {
+    const message = pgError.message ?? 'The requested operation violates an authorization constraint.'
+    if (message.includes('resource_uri_locked')) {
+      return new ApiError(
+        409,
+        'resource_uri_locked',
+        'Resource URI cannot change after a capability catalog has been activated.'
+      )
+    }
+    return new ApiError(400, message.includes('system_role_read_only') ? 'system_role_read_only' : 'invalid_request', message)
   }
   return null
 }
@@ -229,6 +273,9 @@ function parseGroupGrants(value: unknown) {
     const object = grant as Record<string, unknown>
     const groupId = stringField(object, 'group_id')
     const expiresAt = optionalStringField(object, 'expires_at')
+    if (expiresAt !== null && (!expiresAt.includes('T') || !Number.isFinite(Date.parse(expiresAt)))) {
+      throw new ApiError(400, 'invalid_expiry', 'expires_at must be an ISO 8601 timestamp or null.')
+    }
     return { group_id: groupId, expires_at: expiresAt }
   })
 }
@@ -257,12 +304,6 @@ function requireStringArray(body: Record<string, unknown>, key: string): string[
     throw new ApiError(400, 'invalid_field', `${key} must be an array of strings.`)
   }
   return value
-}
-
-function stringArrayField(body: Record<string, unknown>, key: string): string[] {
-  const value = body[key]
-  if (!Array.isArray(value)) return []
-  return value.filter((item): item is string => typeof item === 'string')
 }
 
 function enumField<T extends string>(
