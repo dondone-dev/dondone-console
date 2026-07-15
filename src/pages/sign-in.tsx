@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { KeyRound, LogIn } from 'lucide-react'
 import { startLogin } from '@/lib/auth'
 import { Button } from '@/components/ui/button'
@@ -10,6 +11,20 @@ import {
 } from '@/components/ui/card'
 
 export function SignInPage() {
+  const [pending, setPending] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function signIn() {
+    setPending(true)
+    setError(null)
+    try {
+      await startLogin()
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Unable to start authorization.')
+      setPending(false)
+    }
+  }
+
   return (
     <div className="flex min-h-svh items-center justify-center bg-muted/40 p-6">
       <div className="grid w-full max-w-sm gap-6">
@@ -27,10 +42,15 @@ export function SignInPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <Button className="w-full" onClick={() => void startLogin()}>
+            <Button className="w-full" onClick={() => void signIn()} disabled={pending}>
               <LogIn />
               Sign in with Dondone Auth
             </Button>
+            {error && (
+              <p role="alert" className="mt-3 text-sm text-destructive">
+                {error}
+              </p>
+            )}
           </CardContent>
         </Card>
         <p className="text-center text-xs text-muted-foreground">

@@ -1,8 +1,3 @@
-const DEFAULT_AUTH_BASE = 'https://auth.dondone.dev'
-const DEFAULT_AUTH_CLIENT_ID = 'console'
-const DEFAULT_AUTH_RESOURCE = 'https://api.dondone.dev'
-const DEFAULT_AUTH_SCOPE = 'api:echo'
-
 export interface OAuthTransaction {
   state: string
   verifier: string
@@ -21,25 +16,20 @@ export function normalizeScopes(scope: string): string[] {
   return [...new Set(scope.split(/\s+/).filter(Boolean))]
 }
 
-const AUTH_BASE =
-  (import.meta.env.VITE_AUTH_BASE as string | undefined)?.trim() ||
-  DEFAULT_AUTH_BASE
-const CLIENT_ID =
-  (import.meta.env.VITE_AUTH_CLIENT_ID as string | undefined)?.trim() ||
-  DEFAULT_AUTH_CLIENT_ID
-const AUTH_RESOURCE =
-  (import.meta.env.VITE_AUTH_RESOURCE as string | undefined)?.trim() ||
-  DEFAULT_AUTH_RESOURCE
-const configuredScopes = normalizeScopes(
-  (import.meta.env.VITE_AUTH_SCOPE as string | undefined) ?? DEFAULT_AUTH_SCOPE
-)
-const AUTH_SCOPES =
-  configuredScopes.length > 0 ? configuredScopes : [DEFAULT_AUTH_SCOPE]
-const OAUTH_CLIENT_CONFIG: OAuthClientConfig = {
-  authBase: AUTH_BASE,
-  clientId: CLIENT_ID,
-  resource: AUTH_RESOURCE,
-  scopes: AUTH_SCOPES,
+function requiredOAuthEnv(env: Record<string, unknown>, name: string): string {
+  const value = env[name]
+  if (typeof value !== 'string' || value.trim() === '') {
+    throw new Error(`Missing required OAuth configuration: ${name}.`)
+  }
+  return value.trim()
+}
+
+export function oauthClientConfigFromEnv(env: Record<string, unknown>): OAuthClientConfig {
+  const authBase = requiredOAuthEnv(env, 'VITE_AUTH_BASE')
+  const clientId = requiredOAuthEnv(env, 'VITE_AUTH_CLIENT_ID')
+  const resource = requiredOAuthEnv(env, 'VITE_AUTH_RESOURCE')
+  const scopes = normalizeScopes(requiredOAuthEnv(env, 'VITE_AUTH_SCOPE'))
+  return { authBase, clientId, resource, scopes }
 }
 
 export interface Session {
@@ -127,21 +117,22 @@ function readOAuthTransaction(): OAuthTransaction | null {
 }
 
 export async function startLogin(
-  config: OAuthClientConfig = OAUTH_CLIENT_CONFIG
+  config?: OAuthClientConfig
 ): Promise<void> {
+  const resolvedConfig = config ?? oauthClientConfigFromEnv(import.meta.env)
   const transaction: OAuthTransaction = {
     state: randomValue(16),
     verifier: randomValue(32),
-    resource: config.resource,
-    scopes: config.scopes,
+    resource: resolvedConfig.resource,
+    scopes: resolvedConfig.scopes,
   }
   const challenge = await deriveChallenge(transaction.verifier)
   sessionStorage.setItem(OAUTH_TRANSACTION_KEY, JSON.stringify(transaction))
 
   const redirectUri = `${window.location.origin}/auth/callback`
   const url = buildAuthorizationUrl({
-    authBase: config.authBase,
-    clientId: config.clientId,
+    authBase: resolvedConfig.authBase,
+    clientId: resolvedConfig.clientId,
     redirectUri,
     challenge,
     transaction,
@@ -150,7 +141,7 @@ export async function startLogin(
 }
 
 export async function handleCallback(
-  config: OAuthClientConfig = OAUTH_CLIENT_CONFIG
+  config?: OAuthClientConfig
 ): Promise<Session> {
   const params = new URLSearchParams(window.location.search)
   const code = params.get('code')
@@ -167,13 +158,15 @@ export async function handleCallback(
     throw new Error('Invalid authorization response.')
   }
 
+  const resolvedConfig = config ?? oauthClientConfigFromEnv(import.meta.env)
+
   const redirectUri = `${window.location.origin}/auth/callback`
-  const response = await fetch(`${config.authBase}/api/token`, {
+  const response = await fetch(`${resolvedConfig.authBase}/api/token`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(
       buildTokenExchangeBody({
-        clientId: config.clientId,
+        clientId: resolvedConfig.clientId,
         redirectUri,
         code,
         transaction,

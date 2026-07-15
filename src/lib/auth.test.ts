@@ -4,6 +4,7 @@ import {
   buildTokenExchangeBody,
   handleCallback,
   normalizeScopes,
+  oauthClientConfigFromEnv,
   startLogin,
   type OAuthTransaction,
 } from './auth'
@@ -115,23 +116,10 @@ describe('resource-aware OAuth flow', () => {
     expect(body.scope).toBe(authorizationUrl.searchParams.get('scope'))
   })
 
-  it('uses deployable defaults when Vite auth variables are absent', async () => {
-    const location = {
-      origin: 'https://console.dondone.dev',
-      search: '',
-      href: '',
-    }
-    vi.stubGlobal('window', { location })
-    vi.stubGlobal('sessionStorage', new MemoryStorage())
-
-    await startLogin()
-
-    const url = new URL(location.href)
-    expect(url.toString()).not.toContain('undefined')
-    expect(url.origin).toBe('https://auth.dondone.dev')
-    expect(url.searchParams.get('client_id')).toBe('console')
-    expect(url.searchParams.get('resource')).toBe('https://api.dondone.dev')
-    expect(url.searchParams.get('scope')).toBe('api:echo')
+  it('rejects missing OAuth build configuration instead of using fallbacks', () => {
+    expect(() => oauthClientConfigFromEnv({})).toThrow(
+      'Missing required OAuth configuration: VITE_AUTH_BASE.'
+    )
   })
 
   it('rejects a state mismatch without exchanging the code', async () => {
