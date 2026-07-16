@@ -8,6 +8,7 @@ import { ConsoleLayout } from '@/layouts/console-layout'
 import { SignInPage } from '@/pages/sign-in'
 import { CallbackPage } from '@/pages/callback'
 import { UsersPage } from '@/pages/users'
+import { UserDetailPage } from '@/pages/user-detail'
 import { ServicesPage } from '@/pages/services'
 import { ActivityPage } from '@/pages/activity'
 import { SettingsPage } from '@/pages/settings'
@@ -35,6 +36,7 @@ export default function App() {
           <Route element={<ConsoleGate session={session} signOut={signOut} />}>
             <Route index element={<Navigate to="/users" replace />} />
             <Route path="/users" element={<UsersPage />} />
+            <Route path="/users/:userId" element={<UserDetailPage />} />
             <Route path="/services" element={<ServicesPage />} />
             <Route path="/activity" element={<ActivityPage />} />
             <Route path="/settings" element={<SettingsPage />} />

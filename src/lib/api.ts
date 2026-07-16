@@ -174,15 +174,17 @@ export interface DiffClassification {
   removed_control_options: string[]
 }
 
+export interface UserGroupGrant {
+  id: string
+  user_id: string
+  group_id: string
+  status: 'active' | 'revoked'
+  expires_at: string | null
+}
+
 export interface UserDetail {
   profile: Profile
-  groups: Array<{
-    id: string
-    user_id: string
-    group_id: string
-    status: 'active' | 'revoked'
-    expires_at: string | null
-  }>
+  groups: UserGroupGrant[]
   permissions: string[]
 }
 
