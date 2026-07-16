@@ -38,6 +38,7 @@ export interface PermissionGroup {
   description: string | null
   status: 'active' | 'disabled'
   is_system: boolean
+  usage_policy_id: string | null
   permissions: string[]
 }
 
@@ -54,6 +55,23 @@ export interface Service {
   capability_last_synced_at: string | null
   capability_last_error: string | null
   has_capability_versions: boolean
+  default_group_id: string | null
+}
+
+export interface UsagePolicy {
+  id: string
+  service_key: string
+  key: string
+  name: string
+  description: string | null
+  status: 'active' | 'disabled'
+  rules: UsagePolicyRule[]
+}
+
+export interface UsagePolicyRule {
+  permission_key: string
+  control_key: string
+  value: unknown
 }
 
 export interface CapabilityVersion {
@@ -72,9 +90,14 @@ export interface CapabilityManifest {
   authorization_servers: string[]
   scopes_supported: string[]
   dondone_capabilities: {
-    schema_version: 1
+    schema_version: 1 | 2
     catalog_version: string
-    permissions: Array<{ key: string; description: string }>
+    permissions: Array<{
+      key: string
+      name?: string
+      description: string
+      usage_controls?: unknown[]
+    }>
     roles: Array<{
       key: string
       name: string
@@ -87,8 +110,10 @@ export interface CapabilityManifest {
 export interface ActiveCapability {
   service_key: string
   key: string
+  name: string | null
   description: string
   oauth_scope: boolean
+  usage_controls: unknown[]
   catalog_version: string
 }
 
@@ -102,6 +127,10 @@ export interface DiffClassification {
   removed_roles: string[]
   changed_role_memberships: string[]
   description_changes: string[]
+  added_controls: string[]
+  removed_controls: string[]
+  changed_controls: string[]
+  removed_control_options: string[]
 }
 
 export interface UserGroupGrant {
@@ -157,6 +186,7 @@ export interface ConsoleStore {
     name: string
     description: string | null
     permission_keys: string[]
+    usage_policy_key: string | null
     actor: string
   }): Promise<Service>
   updateGroup(serviceKey: string, groupKey: string, input: {
@@ -164,8 +194,32 @@ export interface ConsoleStore {
     description: string | null
     status: 'active' | 'disabled'
     permission_keys: string[]
+    usage_policy_key: string | null
     actor: string
   }): Promise<Service>
   listCapabilityVersions(serviceKey: string): Promise<CapabilityVersion[]>
   listActiveCapabilities(serviceKey: string): Promise<ActiveCapability[]>
+  listUsagePolicies(serviceKey: string): Promise<UsagePolicy[]>
+  upsertUsagePolicy(
+    serviceKey: string,
+    input: {
+      key: string
+      name: string
+      description: string | null
+      status: 'active' | 'disabled'
+      rules: UsagePolicyRule[]
+      actor: string
+    }
+  ): Promise<UsagePolicy>
+  bindGroupPolicy(
+    serviceKey: string,
+    groupKey: string,
+    policyKey: string | null,
+    actor: string
+  ): Promise<Service>
+  setServiceDefaultGroup(
+    serviceKey: string,
+    groupKey: string | null,
+    actor: string
+  ): Promise<Service>
 }

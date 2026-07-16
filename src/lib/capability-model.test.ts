@@ -37,6 +37,7 @@ describe('capability review model', () => {
       change_type: 'breaking',
       added_permissions: [], removed_permissions: [], added_scopes: ['api:read'], removed_scopes: ['api:write'],
       added_roles: [], removed_roles: [], changed_role_memberships: [], description_changes: [],
+      added_controls: [], removed_controls: [], changed_controls: [], removed_control_options: [],
     })).toEqual([
       { label: '+ OAuth scopes', items: ['api:read'], tone: 'add' },
       { label: '- OAuth scopes', items: ['api:write'], tone: 'remove' },

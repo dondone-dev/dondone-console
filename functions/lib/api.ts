@@ -89,6 +89,7 @@ export async function handleConsoleApi(
           name: stringField(body, 'name'),
           description: optionalStringField(body, 'description'),
           permission_keys: requireStringArray(body, 'permission_keys'),
+          usage_policy_key: optionalStringField(body, 'usage_policy_key'),
           actor: auth.user.id,
         }),
         { status: 201 }
@@ -98,16 +99,17 @@ export async function handleConsoleApi(
     const updateGroupMatch = path.match(/^services\/([^/]+)\/groups\/([^/]+)$/)
     if (request.method === 'PUT' && updateGroupMatch) {
       const body = await readJsonObject(request)
-      return jsonResponse(
-        request,
-        await store.updateGroup(updateGroupMatch[1], updateGroupMatch[2], {
-          name: stringField(body, 'name'),
-          description: optionalStringField(body, 'description'),
-          status: enumField(body, 'status', ['active', 'disabled']),
-          permission_keys: requireStringArray(body, 'permission_keys'),
-          actor: auth.user.id,
-        })
-      )
+      const serviceKey = updateGroupMatch[1]
+      const groupKey = updateGroupMatch[2]
+      const result = await store.updateGroup(serviceKey, groupKey, {
+        name: stringField(body, 'name'),
+        description: optionalStringField(body, 'description'),
+        status: enumField(body, 'status', ['active', 'disabled']),
+        permission_keys: requireStringArray(body, 'permission_keys'),
+        usage_policy_key: optionalStringField(body, 'usage_policy_key'),
+        actor: auth.user.id,
+      })
+      return jsonResponse(request, result)
     }
 
     const updateServiceMatch = path.match(/^services\/([^/]+)$/)
@@ -146,6 +148,50 @@ export async function handleConsoleApi(
       )
     }
 
+    const usagePoliciesMatch = path.match(/^services\/([^/]+)\/usage-policies$/)
+    if (request.method === 'GET' && usagePoliciesMatch) {
+      return jsonResponse(request, {
+        policies: await store.listUsagePolicies(usagePoliciesMatch[1]),
+      })
+    }
+
+    if (request.method === 'POST' && usagePoliciesMatch) {
+      const body = await readJsonObject(request)
+      const result = await store.upsertUsagePolicy(usagePoliciesMatch[1], {
+        key: stringField(body, 'key'),
+        name: stringField(body, 'name'),
+        description: optionalStringField(body, 'description'),
+        status: enumField(body, 'status', ['active', 'disabled']),
+        rules: parseUsagePolicyRules(body.rules),
+        actor: auth.user.id,
+      })
+      return jsonResponse(request, result, { status: 201 })
+    }
+
+    const updatePolicyMatch = path.match(/^services\/([^/]+)\/usage-policies\/([^/]+)$/)
+    if (request.method === 'PUT' && updatePolicyMatch) {
+      const body = await readJsonObject(request)
+      const result = await store.upsertUsagePolicy(updatePolicyMatch[1], {
+        key: updatePolicyMatch[2],
+        name: stringField(body, 'name'),
+        description: optionalStringField(body, 'description'),
+        status: enumField(body, 'status', ['active', 'disabled']),
+        rules: parseUsagePolicyRules(body.rules),
+        actor: auth.user.id,
+      })
+      return jsonResponse(request, result)
+    }
+
+    const defaultGroupMatch = path.match(/^services\/([^/]+)\/default-group$/)
+    if (request.method === 'PUT' && defaultGroupMatch) {
+      const body = await readJsonObject(request)
+      const groupKey = body.group_key === null ? null : stringField(body, 'group_key')
+      return jsonResponse(
+        request,
+        await store.setServiceDefaultGroup(defaultGroupMatch[1], groupKey, auth.user.id)
+      )
+    }
+
     throw new ApiError(404, 'not_found')
   } catch (error) {
     const apiError = error instanceof ApiError ? error : mapDbError(error)
@@ -167,6 +213,7 @@ function requireActiveProfile(profile: { status: 'active' | 'disabled' }): void 
 function mapDbError(error: unknown): ApiError | null {
   const pgError = error as { code?: string; message?: string; details?: string; constraint?: string } | null
   if (!pgError || typeof pgError.code !== 'string') return null
+  const message = pgError.message ?? ''
   if (pgError.code === '23503') {
     return new ApiError(
       400,
@@ -175,9 +222,12 @@ function mapDbError(error: unknown): ApiError | null {
     )
   }
   if (pgError.code === '23505') {
+    if (message.includes('multiple_groups_for_service')) {
+      return new ApiError(409, 'multiple_groups_for_service', message)
+    }
     if (
       pgError.constraint === 'services_resource_uri_unique' ||
-      pgError.message?.includes('services_resource_uri_unique')
+      message.includes('services_resource_uri_unique')
     ) {
       return new ApiError(409, 'resource_uri_already_exists', 'This resource URI is already registered.')
     }
@@ -188,7 +238,15 @@ function mapDbError(error: unknown): ApiError | null {
     )
   }
   if (pgError.code === '23514' || pgError.code === '22023') {
-    const message = pgError.message ?? 'The requested operation violates an authorization constraint.'
+    if (message.includes('policy_not_found')) {
+      return new ApiError(400, 'policy_not_found', message)
+    }
+    if (message.includes('invalid_default_group')) {
+      return new ApiError(400, 'invalid_default_group', message)
+    }
+    if (message.includes('cannot_disable_default_group')) {
+      return new ApiError(400, 'cannot_disable_default_group', message)
+    }
     if (message.includes('resource_uri_locked')) {
       return new ApiError(
         409,
@@ -267,6 +325,21 @@ async function readJsonObject(request: Request): Promise<Record<string, unknown>
   } catch {
     throw new ApiError(400, 'invalid_json')
   }
+}
+
+function parseUsagePolicyRules(
+  value: unknown
+): Array<{ permission_key: string; control_key: string; value: unknown }> {
+  if (!Array.isArray(value)) return []
+  return value.map((item) => {
+    if (!item || typeof item !== 'object') throw new ApiError(400, 'invalid_rules')
+    const r = item as Record<string, unknown>
+    return {
+      permission_key: stringField(r, 'permission_key'),
+      control_key: stringField(r, 'control_key'),
+      value: r.value,
+    }
+  })
 }
 
 function parseGroupGrants(value: unknown) {

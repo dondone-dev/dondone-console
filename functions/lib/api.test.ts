@@ -64,6 +64,7 @@ const services: Service[] = [
     capability_last_synced_at: null,
     capability_last_error: null,
     has_capability_versions: false,
+    default_group_id: null,
     groups: [
       {
         id: 'group-console-admin',
@@ -73,6 +74,7 @@ const services: Service[] = [
         description: null,
         status: 'active',
         is_system: true,
+        usage_policy_id: null,
         permissions: ['console:admin'],
       },
     ],
@@ -115,6 +117,7 @@ function store(overrides: Partial<ConsoleStore> = {}): ConsoleStore {
       capability_last_synced_at: null,
       capability_last_error: null,
       has_capability_versions: false,
+      default_group_id: null,
       groups: [],
     }),
     updateService: async (key, input) => ({
@@ -129,6 +132,7 @@ function store(overrides: Partial<ConsoleStore> = {}): ConsoleStore {
       capability_last_synced_at: null,
       capability_last_error: null,
       has_capability_versions: false,
+      default_group_id: null,
       groups: [],
     }),
     createGroup: async () => services[0],
@@ -136,6 +140,18 @@ function store(overrides: Partial<ConsoleStore> = {}): ConsoleStore {
     deleteService: async () => {},
     listCapabilityVersions: async () => [],
     listActiveCapabilities: async () => [],
+    listUsagePolicies: async () => [],
+    upsertUsagePolicy: async (_serviceKey, input) => ({
+      id: 'policy-1',
+      service_key: 'api',
+      key: input.key,
+      name: input.name,
+      description: input.description,
+      status: input.status,
+      rules: input.rules,
+    }),
+    bindGroupPolicy: async () => services[0],
+    setServiceDefaultGroup: async () => services[0],
     ...overrides,
   }
 }
@@ -355,6 +371,7 @@ describe('console api', () => {
             capability_last_synced_at: null,
             capability_last_error: null,
             has_capability_versions: false,
+            default_group_id: null,
             groups: [],
           }
         },
@@ -384,6 +401,7 @@ describe('console api', () => {
       capability_last_synced_at: null,
       capability_last_error: null,
       has_capability_versions: false,
+      default_group_id: null,
       groups: [],
     })
   })
@@ -418,6 +436,7 @@ describe('console api', () => {
             capability_last_synced_at: null,
             capability_last_error: null,
             has_capability_versions: false,
+            default_group_id: null,
             groups: [],
           }
         },
@@ -568,13 +587,56 @@ describe('console api', () => {
       request('/api/services/api/groups', {
         method: 'POST',
         headers: { ...auth(), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key: 'reader', name: 'Reader', description: null, permission_keys: ['api:echo'] }),
+        body: JSON.stringify({
+          key: 'reader',
+          name: 'Reader',
+          description: null,
+          permission_keys: ['api:echo'],
+          usage_policy_key: 'caller-limits',
+        }),
       }),
       env,
       store({ createGroup: async (_serviceKey, input) => { received = input; return services[0] } })
     )
     expect(response.status).toBe(201)
-    expect(received).toMatchObject({ actor: admin.id, permission_keys: ['api:echo'] })
+    expect(received).toMatchObject({
+      actor: admin.id,
+      permission_keys: ['api:echo'],
+      usage_policy_key: 'caller-limits',
+    })
+  })
+
+  it('updates Group fields and policy binding through one store operation', async () => {
+    let received: unknown
+    let bindCalled = false
+    const response = await handleConsoleApi(
+      request('/api/services/api/groups/reader', {
+        method: 'PUT',
+        headers: { ...auth(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'Reader',
+          description: null,
+          status: 'active',
+          permission_keys: ['api:echo'],
+          usage_policy_key: 'caller-limits',
+        }),
+      }),
+      env,
+      store({
+        updateGroup: async (_serviceKey, _groupKey, input) => {
+          received = input
+          return services[0]
+        },
+        bindGroupPolicy: async () => {
+          bindCalled = true
+          return services[0]
+        },
+      })
+    )
+
+    expect(response.status).toBe(200)
+    expect(received).toMatchObject({ usage_policy_key: 'caller-limits' })
+    expect(bindCalled).toBe(false)
   })
 
   it('rejects malformed permission selections instead of silently clearing a group', async () => {

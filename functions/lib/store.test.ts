@@ -56,12 +56,13 @@ describe('Console store capability grant RPC boundary', () => {
     const store = createConsoleStore(env)
     await store.createGroup('api', {
       key: 'reader', name: 'Reader', description: null,
-      permission_keys: ['api:echo'], actor: 'actor-1',
+      permission_keys: ['api:echo'], usage_policy_key: 'caller-limits', actor: 'actor-1',
     })
 
-    expect(mocks.rpc).toHaveBeenCalledWith('console_create_permission_group', {
+    expect(mocks.rpc).toHaveBeenCalledWith('console_create_permission_group_with_policy', {
       p_service_key: 'api', p_group_key: 'reader', p_name: 'Reader',
-      p_description: null, p_permission_keys: ['api:echo'], p_actor: 'actor-1',
+      p_description: null, p_permission_keys: ['api:echo'],
+      p_usage_policy_key: 'caller-limits', p_actor: 'actor-1',
     })
   })
 
@@ -70,7 +71,8 @@ describe('Console store capability grant RPC boundary', () => {
     const store = createConsoleStore(env)
 
     await expect(store.updateGroup('api', 'reader', {
-      name: 'Changed', description: null, status: 'disabled', permission_keys: [], actor: 'actor-1',
+      name: 'Changed', description: null, status: 'disabled', permission_keys: [],
+      usage_policy_key: null, actor: 'actor-1',
     })).rejects.toMatchObject({ message: 'system_role_read_only' })
     expect(mocks.from).not.toHaveBeenCalled()
   })

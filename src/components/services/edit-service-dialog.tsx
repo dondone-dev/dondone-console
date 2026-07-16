@@ -20,6 +20,7 @@ import {
 import { cn } from '@/lib/utils'
 import { IntegrationTab } from '@/components/services/integration-tab'
 import { ServiceGroupsTab } from '@/components/services/service-groups-tab'
+import { ServiceUsagePoliciesTab } from '@/components/services/service-usage-policies-tab'
 import { Badge, StatusDot } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -41,7 +42,7 @@ import {
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 
-type ServiceDialogTab = 'details' | 'groups' | 'capabilities' | 'integration' | 'settings'
+type ServiceDialogTab = 'details' | 'groups' | 'usage-policies' | 'capabilities' | 'integration' | 'settings'
 
 export function EditServiceDialog({
   session,
@@ -58,6 +59,7 @@ export function EditServiceDialog({
   const tabs: Array<{ id: ServiceDialogTab; label: string }> = [
     { id: 'details', label: 'Details' },
     { id: 'groups', label: `Groups (${service.groups.length})` },
+    { id: 'usage-policies', label: 'Usage policies' },
     { id: 'capabilities', label: 'Capabilities' },
     { id: 'integration', label: 'Integration' },
     { id: 'settings', label: 'Settings' },
@@ -122,6 +124,13 @@ export function EditServiceDialog({
         </TabPanel>
         <TabPanel active={tab === 'groups'} id={panelId('groups')} tabId={tabId('groups')}>
           <ServiceGroupsTab session={session} service={service} />
+        </TabPanel>
+        <TabPanel
+          active={tab === 'usage-policies'}
+          id={panelId('usage-policies')}
+          tabId={tabId('usage-policies')}
+        >
+          <ServiceUsagePoliciesTab session={session} service={service} />
         </TabPanel>
         <TabPanel
           active={tab === 'capabilities'}
@@ -209,17 +218,21 @@ function DetailsTab({ session, service }: { session: Session; service: Service }
   const [status, setStatus] = useState(service.status)
   const [redirectUris, setRedirectUris] = useState(service.redirect_uris.join('\n'))
   const [resourceUri, setResourceUri] = useState(service.resource_uri ?? '')
+  const initialDefaultGroupKey =
+    service.groups.find((group) => group.id === service.default_group_id)?.key ?? null
+  const [defaultGroupKey, setDefaultGroupKey] = useState<string | null>(initialDefaultGroupKey)
 
   const dirty =
     name !== service.name ||
     description !== (service.description ?? '') ||
     status !== service.status ||
     redirectUris !== service.redirect_uris.join('\n') ||
-    resourceUri !== (service.resource_uri ?? '')
+    resourceUri !== (service.resource_uri ?? '') ||
+    defaultGroupKey !== initialDefaultGroupKey
 
   const update = useMutation({
-    mutationFn: () =>
-      apiFetch<Service>(session, `/api/services/${service.key}`, {
+    mutationFn: async () => {
+      const updated = await apiFetch<Service>(session, `/api/services/${service.key}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -229,7 +242,16 @@ function DetailsTab({ session, service }: { session: Session; service: Service }
           redirect_uris: splitLines(redirectUris),
           resource_uri: resourceUri.trim() || null,
         }),
-      }),
+      })
+      if (defaultGroupKey !== initialDefaultGroupKey) {
+        return apiFetch<Service>(session, `/api/services/${service.key}/default-group`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ group_key: defaultGroupKey }),
+        })
+      }
+      return updated
+    },
     onSuccess: () => {
       toast.success(`Service "${name}" saved`)
       void queryClient.invalidateQueries({ queryKey: ['services'] })
@@ -299,6 +321,30 @@ function DetailsTab({ session, service }: { session: Session; service: Service }
             value={redirectUris}
             onChange={(e) => setRedirectUris(e.target.value)}
           />
+        </div>
+        <div className="grid gap-1.5">
+          <Label>Default group</Label>
+          <Select
+            value={defaultGroupKey ?? '__none__'}
+            onValueChange={(value) => setDefaultGroupKey(value === '__none__' ? null : value)}
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__none__">No automatic access</SelectItem>
+              {service.groups
+                .filter((group) => group.status === 'active')
+                .map((group) => (
+                  <SelectItem key={group.id} value={group.key}>
+                    {group.name}
+                  </SelectItem>
+                ))}
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">
+            New users without a group assignment receive this group on first access.
+          </p>
         </div>
       </div>
       <DialogFooter>

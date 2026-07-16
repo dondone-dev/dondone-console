@@ -21,6 +21,7 @@ const service: Service = {
   capability_last_synced_at: null,
   capability_last_error: null,
   has_capability_versions: true,
+  default_group_id: null,
 }
 
 describe('buildOAuthIntegrationConfig', () => {

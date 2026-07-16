@@ -5,7 +5,6 @@ import { toast } from 'sonner'
 import { apiFetch, type Profile, type Service, type UserDetail } from '@/lib/api'
 import type { Session } from '@/lib/auth'
 import { useConsole } from '@/lib/console-context'
-import { cn } from '@/lib/utils'
 import { PageHeader } from '@/components/page-header'
 import { EmptyState } from '@/components/empty-state'
 import { Badge, StatusDot } from '@/components/ui/badge'
@@ -18,8 +17,14 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
-import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   Table,
@@ -147,15 +152,24 @@ function UserGroups({ session, user }: { session: Session; user: Profile }) {
   })
   const groupGrants = detail.data?.groups
   const activeGrants = useMemo(
-    () => new Map(
-      (groupGrants ?? [])
-        .filter((grant) => grant.status === 'active')
-        .map((grant) => [grant.group_id, grant.expires_at] as const)
-    ),
+    () =>
+      new Map(
+        (groupGrants ?? [])
+          .filter((grant) => grant.status === 'active')
+          .map((grant) => [grant.group_id, grant.expires_at] as const)
+      ),
     [groupGrants]
   )
   const [draft, setDraft] = useState<Map<string, string | null> | null>(null)
   const selectedGroups = draft ?? activeGrants
+
+  const groupById = useMemo(() => {
+    const map = new Map<string, Service['groups'][number]>()
+    for (const service of services.data?.services ?? []) {
+      for (const group of service.groups) map.set(group.id, group)
+    }
+    return map
+  }, [services.data?.services])
 
   const save = useMutation({
     mutationFn: () =>
@@ -207,54 +221,62 @@ function UserGroups({ session, user }: { session: Session; user: Profile }) {
             <Skeleton className="h-12 w-full" />
           </div>
         )}
-        {(services.data?.services ?? []).map((service) => (
-          <div key={service.key} className="grid gap-2">
-            <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              {service.name}
-            </div>
-            {service.groups.map((group) => {
-              const checked = selectedGroups.has(group.id)
-              return (
-                <div
-                  key={group.id}
-                  className={cn(
-                    'flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors hover:bg-muted/50',
-                    checked && 'border-primary/40 bg-primary/5 dark:bg-primary/10'
-                  )}
-                >
-                  <Checkbox className="mt-0.5" checked={checked} disabled={group.status !== 'active' && !checked}
-                    onCheckedChange={() => {
-                      const next = new Map(selectedGroups)
-                      if (checked) next.delete(group.id)
-                      else next.set(group.id, null)
-                      setDraft(next)
-                    }} />
-                  <span className="grid gap-0.5 text-sm leading-tight">
-                    <span className="font-medium">{group.name}</span>
-                    <span className="font-mono text-xs text-muted-foreground">
-                      {group.permissions.join(', ') || 'no permissions'}
-                    </span>
-                    {checked && (
-                      <span className="mt-1 grid gap-1">
-                        <span className="text-[11px] text-muted-foreground">Expires at (optional)</span>
-                        <Input
-                          type="datetime-local"
-                          className="h-8 text-xs"
-                          value={toDateTimeLocal(selectedGroups.get(group.id) ?? null)}
-                          onChange={(event) => {
-                            const next = new Map(selectedGroups)
-                            next.set(group.id, event.target.value ? new Date(event.target.value).toISOString() : null)
-                            setDraft(next)
-                          }}
-                        />
-                      </span>
-                    )}
+        {(services.data?.services ?? []).map((service) => {
+          const activeGroups = service.groups.filter((group) => group.status === 'active')
+          const selectedGroupId =
+            activeGroups.find((group) => selectedGroups.has(group.id))?.id ?? null
+          const selectedExpiry = selectedGroupId ? selectedGroups.get(selectedGroupId) ?? null : null
+
+          return (
+            <div key={service.key} className="grid gap-2">
+              <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                {service.name}
+              </div>
+              <Select
+                value={selectedGroupId ?? '__none__'}
+                onValueChange={(value) => {
+                  const next = new Map(selectedGroups)
+                  for (const group of service.groups) next.delete(group.id)
+                  if (value !== '__none__') next.set(value, null)
+                  setDraft(next)
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="No access" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">No access</SelectItem>
+                  {activeGroups.map((group) => (
+                    <SelectItem key={group.id} value={group.id}>
+                      {group.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {selectedGroupId && (
+                <div className="grid gap-1 rounded-lg border p-3 text-sm">
+                  <span className="font-mono text-xs text-muted-foreground">
+                    {(groupById.get(selectedGroupId)?.permissions ?? []).join(', ') || 'no permissions'}
                   </span>
+                  <span className="text-[11px] text-muted-foreground">Expires at (optional)</span>
+                  <Input
+                    type="datetime-local"
+                    className="h-8 text-xs"
+                    value={toDateTimeLocal(selectedExpiry)}
+                    onChange={(event) => {
+                      const next = new Map(selectedGroups)
+                      next.set(
+                        selectedGroupId,
+                        event.target.value ? new Date(event.target.value).toISOString() : null
+                      )
+                      setDraft(next)
+                    }}
+                  />
                 </div>
-              )
-            })}
-          </div>
-        ))}
+              )}
+            </div>
+          )
+        })}
       </CardContent>
       <CardFooter className="flex-col items-stretch gap-2">
         <Button onClick={() => save.mutate()} disabled={draft === null || save.isPending}>

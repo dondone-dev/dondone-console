@@ -1,8 +1,8 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Plus, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
-import { apiFetch, type ActiveCapability, type Service } from '@/lib/api'
+import { apiFetch, type ActiveCapability, type Service, type UsagePolicy } from '@/lib/api'
 import { capabilitySelectionState } from '@/lib/capability-model'
 import type { Session } from '@/lib/auth'
 import { Badge, StatusDot } from '@/components/ui/badge'
@@ -103,6 +103,7 @@ function GroupForm({
   const [selectedPermissions, setSelectedPermissions] = useState<Set<string>>(
     new Set(group?.permissions ?? [])
   )
+  const [usagePolicyKey, setUsagePolicyKey] = useState<string | null | undefined>(undefined)
 
   const activeCaps = useQuery({
     queryKey: ['active-capabilities', service.key],
@@ -113,7 +114,37 @@ function GroupForm({
       ),
   })
 
-  const capList = activeCaps.data?.capabilities ?? []
+  const capList = useMemo(
+    () => activeCaps.data?.capabilities ?? [],
+    [activeCaps.data?.capabilities]
+  )
+  const policies = useQuery({
+    queryKey: ['usage-policies', service.key],
+    queryFn: () =>
+      apiFetch<{ policies: UsagePolicy[] }>(
+        session,
+        `/api/services/${service.key}/usage-policies`
+      ),
+  })
+  const policyList = useMemo(
+    () => policies.data?.policies ?? [],
+    [policies.data?.policies]
+  )
+  const activePolicies = policyList.filter((policy) => policy.status === 'active')
+  const boundPolicyKey = group
+    ? policyList.find((policy) => policy.id === group.usage_policy_id)?.key ?? null
+    : null
+  const selectedUsagePolicyKey = usagePolicyKey === undefined ? boundPolicyKey : usagePolicyKey
+
+  const needsUsagePolicy = useMemo(
+    () =>
+      [...selectedPermissions].some((permKey) => {
+        const cap = capList.find((entry) => entry.key === permKey)
+        return (cap?.usage_controls.length ?? 0) > 0
+      }),
+    [selectedPermissions, capList]
+  )
+
   const queryStatus = activeCaps.isLoading ? 'loading' : activeCaps.isError ? 'error' : 'success'
   const selection = capabilitySelectionState(
     queryStatus,
@@ -145,6 +176,7 @@ function GroupForm({
               description: description || null,
               status,
               permission_keys: permKeys,
+              usage_policy_key: selectedUsagePolicyKey,
             }),
           })
         : apiFetch<Service>(session, `/api/services/${service.key}/groups`, {
@@ -155,6 +187,7 @@ function GroupForm({
               name,
               description: description || null,
               permission_keys: permKeys,
+              usage_policy_key: selectedUsagePolicyKey,
             }),
           })
     },
@@ -263,11 +296,53 @@ function GroupForm({
           </div>
         )}
       </div>
+      {needsUsagePolicy && (
+        <div className="grid gap-1.5">
+          <Label className="text-xs text-muted-foreground">Usage policy</Label>
+          {policies.isLoading && (
+            <p className="text-xs text-muted-foreground">Loading usage policies…</p>
+          )}
+          {policies.isError && (
+            <p className="text-xs text-destructive">Failed to load usage policies.</p>
+          )}
+          {policies.isSuccess && (
+            <Select
+              value={selectedUsagePolicyKey ?? '__none__'}
+              onValueChange={(value) => setUsagePolicyKey(value === '__none__' ? null : value)}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select a policy" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none__">No policy</SelectItem>
+                {activePolicies.map((policy) => (
+                  <SelectItem key={policy.key} value={policy.key}>
+                    {policy.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+          <p className="text-xs text-muted-foreground">
+            Required when this group grants permissions with usage controls.
+          </p>
+        </div>
+      )}
       <div className="flex justify-end gap-2">
         <Button variant="outline" size="sm" onClick={onDone}>
           Cancel
         </Button>
-        <Button size="sm" onClick={() => save.mutate()} disabled={!name || (!group && !key) || !selection.canSave || save.isPending}>
+        <Button
+          size="sm"
+          onClick={() => save.mutate()}
+          disabled={
+            !name ||
+            (!group && !key) ||
+            !selection.canSave ||
+            (needsUsagePolicy && !selectedUsagePolicyKey) ||
+            save.isPending
+          }
+        >
           {save.isPending && <RefreshCw className="animate-spin" />}
           {group ? 'Save' : 'Create group'}
         </Button>

@@ -35,6 +35,7 @@ export interface PermissionGroup {
   description: string | null
   status: 'active' | 'disabled'
   is_system: boolean
+  usage_policy_id: string | null
   permissions: string[]
 }
 
@@ -51,7 +52,68 @@ export interface Service {
   capability_last_synced_at: string | null
   capability_last_error: string | null
   has_capability_versions: boolean
+  default_group_id: string | null
 }
+
+export interface UsagePolicy {
+  id: string
+  service_key: string
+  key: string
+  name: string
+  description: string | null
+  status: 'active' | 'disabled'
+  rules: UsagePolicyRule[]
+}
+
+export interface UsagePolicyRule {
+  permission_key: string
+  control_key: string
+  value: unknown
+}
+
+export type UsageControl =
+  | {
+      key: string
+      name: string
+      description?: string
+      kind: 'quota'
+      unit: string
+      window: 'calendar_day' | 'lifetime'
+      minimum: 0
+      maximum: number
+    }
+  | {
+      key: string
+      name: string
+      description?: string
+      kind: 'rate_limit'
+      unit: string
+      window_seconds: 60 | 3600
+      minimum: 0
+      maximum: number
+    }
+  | {
+      key: string
+      name: string
+      description?: string
+      kind: 'enum_one' | 'enum_many'
+      options: Array<{ value: string; label: string }>
+    }
+  | {
+      key: string
+      name: string
+      description?: string
+      kind: 'boolean'
+    }
+  | {
+      key: string
+      name: string
+      description?: string
+      kind: 'numeric_ceiling'
+      unit: string
+      minimum: number
+      maximum: number
+    }
 
 export interface CapabilityVersion {
   id: string
@@ -69,9 +131,14 @@ export interface CapabilityManifest {
   authorization_servers: string[]
   scopes_supported: string[]
   dondone_capabilities: {
-    schema_version: 1
+    schema_version: 1 | 2
     catalog_version: string
-    permissions: Array<{ key: string; description: string }>
+    permissions: Array<{
+      key: string
+      name?: string
+      description: string
+      usage_controls?: unknown[]
+    }>
     roles: Array<{
       key: string
       name: string
@@ -84,8 +151,10 @@ export interface CapabilityManifest {
 export interface ActiveCapability {
   service_key: string
   key: string
+  name: string | null
   description: string
   oauth_scope: boolean
+  usage_controls: UsageControl[]
   catalog_version: string
 }
 
@@ -99,6 +168,10 @@ export interface DiffClassification {
   removed_roles: string[]
   changed_role_memberships: string[]
   description_changes: string[]
+  added_controls: string[]
+  removed_controls: string[]
+  changed_controls: string[]
+  removed_control_options: string[]
 }
 
 export interface UserDetail {

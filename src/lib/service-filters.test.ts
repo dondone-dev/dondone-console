@@ -16,6 +16,7 @@ function makeService(overrides: Partial<Service> = {}): Service {
     capability_last_synced_at: null,
     capability_last_error: null,
     has_capability_versions: false,
+    default_group_id: null,
     ...overrides,
   }
 }

@@ -1,6 +1,5 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import {
-  type ActiveCapability,
   type CapabilityVersion,
   type ConsoleEnv,
   type ConsoleStore,
@@ -14,7 +13,7 @@ import { assertValidRedirectUris, assertValidServiceKey, normalizeResourceUri, r
 type DbClient = SupabaseClient<any, any, any, any, any>
 
 const SERVICE_SELECT =
-  'key,name,description,status,redirect_uris,resource_uri,capability_sync_status,active_capability_version,capability_last_synced_at,capability_last_error,service_capability_versions!service_capability_versions_service_key_fkey(id),permission_groups(id,service_key,key,name,description,status,is_system,permission_group_permissions(permissions(key)))'
+  'key,name,description,status,redirect_uris,resource_uri,default_group_id,capability_sync_status,active_capability_version,capability_last_synced_at,capability_last_error,service_capability_versions!service_capability_versions_service_key_fkey(id),permission_groups(id,service_key,key,name,description,status,is_system,usage_policy_id,permission_group_permissions(permissions(key)))'
 
 interface PermissionGroupRow {
   id: string
@@ -24,6 +23,7 @@ interface PermissionGroupRow {
   description: string | null
   status: 'active' | 'disabled'
   is_system: boolean
+  usage_policy_id: string | null
   permission_group_permissions?: Array<{
     permissions: { key: string } | null
   }>
@@ -36,6 +36,7 @@ interface ServiceRow {
   status: 'active' | 'disabled'
   redirect_uris: string[]
   resource_uri: string | null
+  default_group_id: string | null
   capability_sync_status: string
   active_capability_version: string | null
   capability_last_synced_at: string | null
@@ -137,6 +138,7 @@ export function createConsoleStore(env: ConsoleEnv): ConsoleStore {
         .upsert({
           user_id: userId,
           group_id: group.id,
+          service_key: 'console',
           status: 'active',
           expires_at: null,
         })
@@ -234,12 +236,13 @@ export function createConsoleStore(env: ConsoleEnv): ConsoleStore {
     },
 
     async createGroup(serviceKey, input) {
-      const { error } = await admin.rpc('console_create_permission_group', {
+      const { error } = await admin.rpc('console_create_permission_group_with_policy', {
         p_service_key: serviceKey,
         p_group_key: input.key,
         p_name: input.name,
         p_description: input.description,
         p_permission_keys: input.permission_keys,
+        p_usage_policy_key: input.usage_policy_key,
         p_actor: input.actor,
       })
       if (error) throw error
@@ -247,13 +250,14 @@ export function createConsoleStore(env: ConsoleEnv): ConsoleStore {
     },
 
     async updateGroup(serviceKey, groupKey, input) {
-      const { error } = await admin.rpc('console_update_permission_group', {
+      const { error } = await admin.rpc('console_update_permission_group_with_policy', {
         p_service_key: serviceKey,
         p_group_key: groupKey,
         p_name: input.name,
         p_description: input.description,
         p_status: input.status,
         p_permission_keys: input.permission_keys,
+        p_usage_policy_key: input.usage_policy_key,
         p_actor: input.actor,
       })
       if (error) throw error
@@ -272,13 +276,86 @@ export function createConsoleStore(env: ConsoleEnv): ConsoleStore {
     },
 
     async listActiveCapabilities(serviceKey) {
+      const { data: service, error: serviceError } = await admin
+        .from('services')
+        .select('active_capability_version,status')
+        .eq('key', serviceKey)
+        .single<{ active_capability_version: string | null; status: 'active' | 'disabled' }>()
+      if (serviceError) throw serviceError
+      if (!service.active_capability_version || service.status !== 'active') return []
+
       const { data, error } = await admin
-        .from('active_service_capabilities')
-        .select('service_key,key,description,oauth_scope,catalog_version')
+        .from('service_capabilities')
+        .select('service_key,key,name,description,oauth_scope,usage_controls,catalog_version')
         .eq('service_key', serviceKey)
-        .returns<ActiveCapability[]>()
+        .eq('catalog_version', service.active_capability_version)
       if (error) throw error
-      return data ?? []
+      return (data ?? []).map((row) => ({
+        service_key: row.service_key,
+        key: row.key,
+        name: row.name ?? null,
+        description: row.description,
+        oauth_scope: row.oauth_scope,
+        usage_controls: Array.isArray(row.usage_controls) ? row.usage_controls : [],
+        catalog_version: row.catalog_version,
+      }))
+    },
+
+    async listUsagePolicies(serviceKey) {
+      const { data, error } = await admin
+        .from('usage_policies')
+        .select('id,service_key,key,name,description,status,usage_policy_rules(permission_key,control_key,value)')
+        .eq('service_key', serviceKey)
+        .order('key')
+      if (error) throw error
+      return (data ?? []).map((row) => ({
+        id: row.id,
+        service_key: row.service_key,
+        key: row.key,
+        name: row.name,
+        description: row.description ?? null,
+        status: row.status,
+        rules: (row.usage_policy_rules ?? []).map((r: { permission_key: string; control_key: string; value: unknown }) => ({
+          permission_key: r.permission_key,
+          control_key: r.control_key,
+          value: r.value,
+        })),
+      }))
+    },
+
+    async upsertUsagePolicy(serviceKey, input) {
+      const { error } = await admin.rpc('console_upsert_usage_policy', {
+        p_service_key: serviceKey,
+        p_policy_key: input.key,
+        p_name: input.name,
+        p_description: input.description,
+        p_status: input.status,
+        p_rules: input.rules,
+        p_actor: input.actor,
+      })
+      if (error) throw error
+      return (await this.listUsagePolicies(serviceKey)).find((p) => p.key === input.key)!
+    },
+
+    async bindGroupPolicy(serviceKey, groupKey, policyKey, actor) {
+      const { error } = await admin.rpc('console_bind_group_usage_policy', {
+        p_service_key: serviceKey,
+        p_group_key: groupKey,
+        p_policy_key: policyKey,
+        p_actor: actor,
+      })
+      if (error) throw error
+      return serviceByKey(admin, serviceKey)
+    },
+
+    async setServiceDefaultGroup(serviceKey, groupKey, actor) {
+      const { error } = await admin.rpc('console_set_service_default_group', {
+        p_service_key: serviceKey,
+        p_group_key: groupKey,
+        p_actor: actor,
+      })
+      if (error) throw error
+      return serviceByKey(admin, serviceKey)
     },
   }
 }
@@ -337,6 +414,7 @@ function mapService(row: ServiceRow): Service {
     capability_last_synced_at: row.capability_last_synced_at ?? null,
     capability_last_error: row.capability_last_error ?? null,
     has_capability_versions: (row.service_capability_versions?.length ?? 0) > 0,
+    default_group_id: row.default_group_id ?? null,
   }
 }
 
@@ -349,6 +427,7 @@ function mapGroup(row: PermissionGroupRow): PermissionGroup {
     description: row.description,
     status: row.status,
     is_system: row.is_system,
+    usage_policy_id: row.usage_policy_id ?? null,
     permissions: (row.permission_group_permissions ?? [])
       .map((item) => item.permissions?.key)
       .filter((key): key is string => typeof key === 'string')
