@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { loadEnv } from 'vite'
 import {
   buildAuthorizationUrl,
   buildTokenExchangeBody,
@@ -120,6 +121,17 @@ describe('resource-aware OAuth flow', () => {
     expect(() => oauthClientConfigFromEnv({})).toThrow(
       'Missing required OAuth configuration: VITE_AUTH_BASE.'
     )
+  })
+
+  it('ships the production OAuth build configuration', () => {
+    const env = loadEnv('production', process.cwd(), '')
+
+    expect(oauthClientConfigFromEnv(env)).toEqual({
+      authBase: 'https://auth.dondone.dev',
+      clientId: 'console',
+      resource: 'https://api.dondone.dev',
+      scopes: ['api:echo'],
+    })
   })
 
   it('rejects a state mismatch without exchanging the code', async () => {
