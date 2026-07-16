@@ -90,7 +90,10 @@ export function EditServiceDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[85svh] max-w-2xl overflow-y-auto">
+      <DialogContent
+        className="max-h-[85svh] max-w-2xl overflow-y-auto"
+        dismissOnPointerDownOutside={false}
+      >
         <DialogHeader>
           <DialogTitle>{service.name}</DialogTitle>
           <DialogDescription>
