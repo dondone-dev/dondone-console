@@ -34,7 +34,6 @@ export function oauthClientConfigFromEnv(env: Record<string, unknown>): OAuthCli
 
 export interface Session {
   accessToken: string
-  refreshToken: string
   email: string
 }
 
@@ -175,17 +174,15 @@ export async function handleCallback(
   })
   const body = (await response.json()) as {
     access_token?: string
-    refresh_token?: string
     error?: string
     message?: string
   }
-  if (!response.ok || !body.access_token || !body.refresh_token) {
+  if (!response.ok || !body.access_token) {
     throw new Error(body.message ?? body.error ?? 'Token exchange failed.')
   }
 
   const session = {
     accessToken: body.access_token,
-    refreshToken: body.refresh_token,
     email: decodeEmail(body.access_token) ?? '',
   }
   saveSession(session)
