@@ -575,9 +575,10 @@ describe('console api', () => {
     )
 
     expect(response.status).toBe(400)
+    // Raw Postgres details (column names, row values) must not reach the client.
     expect(await response.json()).toEqual({
       error: 'invalid_reference',
-      message: 'Key (permission_key)=(tier:lowb_vip) is not present in table "permissions".',
+      message: 'A referenced record does not exist.',
     })
   })
 

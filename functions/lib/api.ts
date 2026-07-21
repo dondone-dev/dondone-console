@@ -214,16 +214,16 @@ function mapDbError(error: unknown): ApiError | null {
   const pgError = error as { code?: string; message?: string; details?: string; constraint?: string } | null
   if (!pgError || typeof pgError.code !== 'string') return null
   const message = pgError.message ?? ''
+  // Detection keys on the raw Postgres text, but the client only ever receives
+  // a stable, safe message. Raw details/columns/constraints and row values stay
+  // server-side (logged as code + constraint only, never returned verbatim).
+  console.warn('console_db_error', { code: pgError.code, constraint: pgError.constraint })
   if (pgError.code === '23503') {
-    return new ApiError(
-      400,
-      'invalid_reference',
-      pgError.details ?? pgError.message ?? 'A referenced record does not exist.'
-    )
+    return new ApiError(400, 'invalid_reference', 'A referenced record does not exist.')
   }
   if (pgError.code === '23505') {
     if (message.includes('multiple_groups_for_service')) {
-      return new ApiError(409, 'multiple_groups_for_service', message)
+      return new ApiError(409, 'multiple_groups_for_service', 'A user can belong to only one permission group per service.')
     }
     if (
       pgError.constraint === 'services_resource_uri_unique' ||
@@ -231,21 +231,17 @@ function mapDbError(error: unknown): ApiError | null {
     ) {
       return new ApiError(409, 'resource_uri_already_exists', 'This resource URI is already registered.')
     }
-    return new ApiError(
-      409,
-      'already_exists',
-      pgError.details ?? pgError.message ?? 'A record with this key already exists.'
-    )
+    return new ApiError(409, 'already_exists', 'A record with this key already exists.')
   }
   if (pgError.code === '23514' || pgError.code === '22023') {
     if (message.includes('policy_not_found')) {
-      return new ApiError(400, 'policy_not_found', message)
+      return new ApiError(400, 'policy_not_found', 'The selected usage policy was not found.')
     }
     if (message.includes('invalid_default_group')) {
-      return new ApiError(400, 'invalid_default_group', message)
+      return new ApiError(400, 'invalid_default_group', 'The selected default group is not valid for this service.')
     }
     if (message.includes('cannot_disable_default_group')) {
-      return new ApiError(400, 'cannot_disable_default_group', message)
+      return new ApiError(400, 'cannot_disable_default_group', 'This group cannot be disabled while it is set as the service default.')
     }
     if (message.includes('resource_uri_locked')) {
       return new ApiError(
@@ -254,7 +250,10 @@ function mapDbError(error: unknown): ApiError | null {
         'Resource URI cannot change after a capability catalog has been activated.'
       )
     }
-    return new ApiError(400, message.includes('system_role_read_only') ? 'system_role_read_only' : 'invalid_request', message)
+    if (message.includes('system_role_read_only')) {
+      return new ApiError(400, 'system_role_read_only', 'System roles are read-only.')
+    }
+    return new ApiError(400, 'invalid_request', 'The request could not be completed.')
   }
   return null
 }

@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import { RefreshCw, ShieldAlert } from 'lucide-react'
+import { toast } from 'sonner'
 import { clearSession, loadSession, type Session } from '@/lib/auth'
 import { ApiClientError, apiFetch, type MeResponse } from '@/lib/api'
 import { ConsoleLayout } from '@/layouts/console-layout'
@@ -57,6 +58,21 @@ function ConsoleGate({ session, signOut }: { session: Session; signOut: () => vo
     retry: false,
   })
 
+  const bootstrap = useMutation({
+    mutationFn: () =>
+      apiFetch<{ ok: boolean; console_admin: boolean }>(session, '/api/bootstrap', {
+        method: 'POST',
+      }),
+    onSuccess: async () => {
+      toast.success('Admin access initialized')
+      await me.refetch()
+    },
+    onError: (error) =>
+      toast.error('Could not initialize admin access', {
+        description: error instanceof Error ? error.message : undefined,
+      }),
+  })
+
   if (me.isLoading) {
     return (
       <div className="flex min-h-svh items-center justify-center gap-2 text-sm text-muted-foreground">
@@ -69,13 +85,18 @@ function ConsoleGate({ session, signOut }: { session: Session; signOut: () => vo
   if (me.isError) {
     const error = me.error
     const isExpired = error instanceof ApiClientError && error.status === 401
+    // Keep infrastructure detail (env-var names, raw error text) out of the UI,
+    // which any signed-in user can reach; surface it only in the browser console.
+    if (!isExpired) {
+      console.error('Console setup error:', error)
+    }
     return (
       <CenteredState
-        title={isExpired ? 'Session expired' : 'Console setup error'}
+        title={isExpired ? 'Session expired' : 'Console unavailable'}
         description={
           isExpired
             ? 'Sign in again to continue.'
-            : `The Console API could not load your account. Check SUPABASE_SERVICE_ROLE_KEY, SUPABASE_PUBLISHABLE_KEY, and SQL migration status. (${error instanceof Error ? error.message : 'unknown_error'})`
+            : 'The Console could not load your account. Please try again later, or contact an administrator if the problem persists.'
         }
         action={<Button onClick={signOut}>Sign out</Button>}
       />
@@ -89,7 +110,12 @@ function ConsoleGate({ session, signOut }: { session: Session; signOut: () => vo
         description="This account is not a Console administrator."
         action={
           <div className="flex gap-2">
-            <Button variant="outline" disabled>
+            <Button
+              variant="outline"
+              onClick={() => bootstrap.mutate()}
+              disabled={bootstrap.isPending}
+            >
+              {bootstrap.isPending && <RefreshCw className="size-4 animate-spin" />}
               Initialize admin access
             </Button>
             <Button variant="ghost" onClick={signOut}>
